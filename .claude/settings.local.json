@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(node -e \"const s = require\\('@supabase/ssr'\\); console.log\\(Object.keys\\(s\\)\\)\")",
+      "Bash(npx tsc *)",
+      "Bash(npx eslint *)",
+      "Bash(npx next *)",
+      "Bash(npm run *)",
+      "Bash(git stash *)",
+      "Bash(grep -E \"\\\\.tsx|\\\\.ts$\")",
+      "Bash(echo \"exit=$?\")",
+      "Bash(npx tsx *)"
+    ]
+  }
+}

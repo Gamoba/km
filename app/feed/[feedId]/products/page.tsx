@@ -1,0 +1,47 @@
+import { redirect, notFound } from 'next/navigation'
+import { createSupabaseServerClient } from '@/lib/supabase-server'
+import { adminDb, getOwnedFeed } from '@/lib/feeds'
+import { ProductsClient } from '@/app/products/ProductsClient'
+
+export default async function FeedProductsPage({
+  params,
+}: {
+  params: Promise<{ feedId: string }>
+}) {
+  const { feedId } = await params
+
+  const supabase = await createSupabaseServerClient()
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
+  if (!user) redirect('/login')
+
+  const feed = await getOwnedFeed(user.id, feedId)
+  if (!feed) notFound()
+
+  // Ensure a feed_settings row exists so other pages (mapping, validation)
+  // can rely on the invariant. Feed mode is managed exclusively from the
+  // settings page now — it's not surfaced on the products page.
+  const db = adminDb()
+  const { data: settingsData } = await db
+    .from('feed_settings')
+    .select('feed_id')
+    .eq('feed_id', feedId)
+    .maybeSingle()
+
+  if (!settingsData) {
+    await db.from('feed_settings').insert({
+      feed_id: feedId,
+      user_id: user.id,
+      feed_mode: 'product',
+    })
+  }
+
+  return (
+    <ProductsClient
+      feedId={feedId}
+      feedName={feed.name}
+      userEmail={user.email ?? ''}
+    />
+  )
+}
