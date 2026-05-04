@@ -2,8 +2,14 @@ import { createSupabaseServerClient } from '@/lib/supabase-server'
 import { adminDb, getOwnedFeed } from '@/lib/feeds'
 import { toShopifyData, type SupabaseProduct } from '@/lib/sync'
 
-const ALLOWED_PAGE_SIZES = [25, 50, 100, 200] as const
+const ALLOWED_PAGE_SIZES = [20, 25, 50, 100, 200] as const
 const DEFAULT_PAGE_SIZE = 25
+
+// Strip Postgres ilike wildcard chars from user input so they can't accidentally
+// (or intentionally) inject wildcards into the LIKE pattern we wrap them in.
+function escapeIlike(s: string): string {
+  return s.replace(/[%_\\]/g, '')
+}
 
 export async function GET(req: Request) {
   const supabase = await createSupabaseServerClient()
@@ -29,11 +35,24 @@ export async function GET(req: Request) {
     ? pageSizeRaw
     : DEFAULT_PAGE_SIZE
 
-  // Server-side search across title/vendor/handle/tags. We strip characters
-  // that break PostgREST's .or() DSL (commas, parens, asterisks); the input
-  // is otherwise free-form and case-insensitive via ilike.
+  // Free-text search across title/vendor/handle/tags. Strip characters that
+  // break PostgREST's .or() DSL (commas, parens, asterisks); the input is
+  // otherwise free-form and case-insensitive via ilike.
   const searchRaw = (url.searchParams.get('search') ?? '').trim()
   const search = searchRaw.replace(/[,()*]/g, '')
+
+  // Discrete filter params used by the field-preview sidebar. Each one is
+  // optional; missing or empty params are no-ops. All filters AND together.
+  const fVendor = (url.searchParams.get('vendor') ?? '').trim()
+  const fProductType = (url.searchParams.get('product_type') ?? '').trim()
+  const fStatus = (url.searchParams.get('status') ?? '').trim()
+  const fInStock = (url.searchParams.get('in_stock') ?? '').trim()
+  const fTags = (url.searchParams.get('tags') ?? '').trim()
+  const fSku = (url.searchParams.get('sku') ?? '').trim()
+  const fTitle = (url.searchParams.get('title') ?? '').trim()
+  const fHandle = (url.searchParams.get('handle') ?? '').trim()
+  const fPriceGt = (url.searchParams.get('price_gt') ?? '').trim()
+  const fPriceLt = (url.searchParams.get('price_lt') ?? '').trim()
 
   try {
     const db = adminDb()
@@ -52,6 +71,42 @@ export async function GET(req: Request) {
       query = query.or(
         `title.ilike.${pattern},vendor.ilike.${pattern},handle.ilike.${pattern},tags.ilike.${pattern}`
       )
+    }
+
+    if (fVendor) query = query.eq('vendor', fVendor)
+    if (fProductType) query = query.eq('product_type', fProductType)
+
+    // Status: "active" exact-match; "inactive" = anything that isn't active.
+    if (fStatus === 'active') query = query.eq('status', 'active')
+    else if (fStatus === 'inactive') query = query.neq('status', 'active')
+
+    // Inventory lives inside the variants JSONB array. Postgres jsonb path +
+    // ::int cast lets us compare numerically against the first variant's
+    // inventory_quantity.
+    if (fInStock === 'true') {
+      query = query.filter('variants->0->>inventory_quantity::int', 'gt', 0)
+    } else if (fInStock === 'false') {
+      query = query.filter('variants->0->>inventory_quantity::int', 'lte', 0)
+    }
+
+    if (fTags) query = query.ilike('tags', `%${escapeIlike(fTags)}%`)
+    if (fTitle) query = query.ilike('title', `%${escapeIlike(fTitle)}%`)
+    if (fHandle) query = query.ilike('handle', `%${escapeIlike(fHandle)}%`)
+    if (fSku) {
+      query = query.filter(
+        'variants->0->>sku',
+        'ilike',
+        `%${escapeIlike(fSku)}%`
+      )
+    }
+
+    if (fPriceGt) {
+      const n = parseFloat(fPriceGt)
+      if (!Number.isNaN(n)) query = query.filter('variants->0->>price::numeric', 'gt', n)
+    }
+    if (fPriceLt) {
+      const n = parseFloat(fPriceLt)
+      if (!Number.isNaN(n)) query = query.filter('variants->0->>price::numeric', 'lt', n)
     }
 
     const { data, error, count } = await query

@@ -33,28 +33,49 @@ export async function GET() {
     validation_errors: ValidationIssue[] | null
   }
 
-  const [
-    { data: productCounts },
-    { data: caches },
-    { data: lastSyncs },
-    filterCounts,
-  ] = await Promise.all([
-    feedIds.length
-      ? db.from('products').select('feed_id').in('feed_id', feedIds)
-      : Promise.resolve({ data: [] as { feed_id: string }[] }),
-    feedIds.length
-      ? db
-          .from('feed_cache')
-          .select('feed_id, generated_at, product_count, validation_status, validation_errors')
-          .in('feed_id', feedIds)
-      : Promise.resolve({ data: [] as CacheRow[] }),
-    feedIds.length
-      ? db.from('products').select('feed_id, synced_at').in('feed_id', feedIds).not('synced_at', 'is', null)
-      : Promise.resolve({ data: [] as { feed_id: string; synced_at: string }[] }),
-    Promise.all(
-      feedIds.map(async (id) => [id, await countFilteredProducts(id)] as const)
-    ),
-  ])
+  let productCounts: { feed_id: string }[] | null = []
+  let caches: CacheRow[] | null = []
+  let lastSyncs: { feed_id: string; synced_at: string }[] | null = []
+  let filterCounts: (readonly [string, { total: number; included: number }])[] = []
+
+  try {
+    const results = await Promise.all([
+      feedIds.length
+        ? db.from('products').select('feed_id').in('feed_id', feedIds)
+        : Promise.resolve({ data: [] as { feed_id: string }[] }),
+      feedIds.length
+        ? db
+            .from('feed_cache')
+            .select('feed_id, generated_at, product_count, validation_status, validation_errors')
+            .in('feed_id', feedIds)
+        : Promise.resolve({ data: [] as CacheRow[] }),
+      feedIds.length
+        ? db.from('products').select('feed_id, synced_at').in('feed_id', feedIds).not('synced_at', 'is', null)
+        : Promise.resolve({ data: [] as { feed_id: string; synced_at: string }[] }),
+      // countFilteredProducts can throw for a single feed (DB error, etc.).
+      // Use allSettled so one bad feed doesn't blow up the whole dashboard;
+      // the failed feed just falls back to {0,0} included/excluded counts.
+      Promise.allSettled(
+        feedIds.map(async (id) => [id, await countFilteredProducts(id)] as const)
+      ),
+    ])
+    productCounts = (results[0].data as { feed_id: string }[] | null) ?? []
+    caches = (results[1].data as CacheRow[] | null) ?? []
+    lastSyncs = (results[2].data as { feed_id: string; synced_at: string }[] | null) ?? []
+    filterCounts = results[3]
+      .map((r) => {
+        if (r.status === 'fulfilled') return r.value
+        console.error('[/api/feeds] countFilteredProducts fejlede for ét feed:', r.reason)
+        return null
+      })
+      .filter((x): x is readonly [string, { total: number; included: number }] => x !== null)
+  } catch (err) {
+    console.error('[/api/feeds] dashboard-data hentning fejlede:', err)
+    return NextResponse.json(
+      { error: err instanceof Error ? err.message : 'Ukendt serverfejl' },
+      { status: 500 }
+    )
+  }
 
   const productCount = new Map<string, number>()
   for (const row of (productCounts ?? []) as { feed_id: string }[]) {

@@ -24,7 +24,9 @@ type Config = Record<string, unknown>
 type FieldState = { type: MappingType; config: Config }
 
 type Condition = { field: string; operator: string; value: string; logic: 'AND' | 'OR' | null }
-type ElseBranch = { type: 'empty' | 'static' | 'field'; value: string }
+type ElseBranch =
+  | { type: 'empty' | 'static' | 'field'; value: string }
+  | { type: 'combine'; blocks: { type: 'field' | 'text'; value: string }[] }
 type OnlyIf = { conditions: Condition[]; else: ElseBranch }
 
 type AISuggestion = {
@@ -38,48 +40,102 @@ type AISuggestion = {
 
 // ── Static data ────────────────────────────────────────────────────────────
 
-const SECTIONS: { title: string; fields: string[] }[] = [
+// Required Google Shopping fields — always visible, top of the page, never collapsed.
+const REQUIRED_FIELDS = [
+  'id', 'title', 'description', 'link', 'image_link', 'availability', 'price', 'brand',
+] as const
+
+// Collapsible sections — collapsed by default, auto-opened when at least one
+// field inside has a saved mapping.
+const COLLAPSIBLE_SECTIONS: { title: string; fields: string[] }[] = [
   {
-    title: 'Obligatoriske',
-    fields: ['id', 'title', 'description', 'link', 'image_link', 'availability', 'price', 'brand'],
+    title: 'Identifiers',
+    fields: ['condition', 'gtin', 'mpn', 'identifier_exists', 'item_group_id'],
+  },
+  {
+    title: 'Pris',
+    fields: ['sale_price', 'sale_price_effective_date', 'cost_of_goods_sold', 'auto_pricing_min_price'],
   },
   {
     title: 'Produkt kategori',
     fields: ['google_product_category', 'product_type'],
   },
   {
-    title: 'Identifiers',
-    fields: ['gtin', 'mpn', 'condition', 'identifier_exists'],
-  },
-  {
     title: 'Varianter',
-    fields: [
-      'item_group_id', 'color', 'size', 'gender', 'age_group',
-      'material', 'pattern', 'size_type', 'size_system',
-    ],
-  },
-  {
-    title: 'Pris',
-    fields: ['sale_price', 'sale_price_effective_date'],
-  },
-  {
-    title: 'Ekstra',
-    fields: ['additional_image_link', 'shipping', 'shipping_weight'],
+    fields: ['color', 'size', 'gender', 'age_group', 'material', 'pattern', 'size_type', 'size_system'],
   },
   {
     title: 'Kampagner',
-    fields: ['custom_label_0', 'custom_label_1', 'custom_label_2', 'custom_label_3', 'custom_label_4'],
+    fields: ['custom_label_0', 'custom_label_1', 'custom_label_2', 'custom_label_3', 'custom_label_4', 'promotion_id'],
   },
   {
-    title: 'Detaljer',
+    title: 'Shipping',
+    fields: ['shipping', 'shipping_label', 'shipping_weight', 'max_handling_time', 'min_handling_time'],
+  },
+  {
+    title: 'Ekstra billeder & medier',
+    fields: ['additional_image_link', 'lifestyle_image_link', 'short_title'],
+  },
+]
+
+// Advanced fields — only shown in the UI when the user explicitly adds them
+// via the "+ Tilføj felt" modal. Grouped here purely for the modal's layout.
+const ADVANCED_CATEGORIES: { title: string; fields: string[] }[] = [
+  {
+    title: 'Pris & tilgængelighed',
     fields: [
-      'product_highlight', 'product_detail',
+      'availability_date', 'expiration_date',
+      'unit_pricing_measure', 'unit_pricing_base_measure',
+      'installment', 'subscription_cost',
+      'loyalty_program', 'maximum_retail_price',
+    ],
+  },
+  {
+    title: 'Produkt detaljer',
+    fields: [
+      'adult', 'multipack', 'is_bundle',
+      'product_detail', 'product_highlight',
       'product_length', 'product_width', 'product_height', 'product_weight',
+    ],
+  },
+  {
+    title: 'Certificering & energi',
+    fields: [
+      'certification',
+      'energy_efficiency_class', 'min_energy_efficiency_class', 'max_energy_efficiency_class',
+    ],
+  },
+  {
+    title: 'Medier',
+    fields: ['video_link', 'virtual_model_link', 'mobile_link'],
+  },
+  {
+    title: 'Kampagner & ads',
+    fields: [
+      'ads_redirect',
+      'excluded_destination', 'included_destination',
+      'shopping_ads_excluded_country',
+      'pause',
+    ],
+  },
+  {
+    title: 'Shipping (avanceret)',
+    fields: [
+      'carrier_shipping', 'handling_cutoff_time', 'minimum_order_value',
+      'shipping_length', 'shipping_width', 'shipping_height',
+      'ships_from_country',
+      'shipping_transit_business_days', 'shipping_handling_business_days',
+      'free_shipping_threshold', 'return_policy_label',
     ],
   },
 ]
 
-const ALL_FIELDS = SECTIONS.flatMap((s) => s.fields)
+const COLLAPSIBLE_FIELDS = COLLAPSIBLE_SECTIONS.flatMap((s) => s.fields)
+const ADVANCED_FIELDS = ADVANCED_CATEGORIES.flatMap((c) => c.fields)
+
+// Every field the mapping UI knows about — used for state initialisation,
+// AI-suggestion validation and the save serialisation.
+const ALL_FIELDS = [...REQUIRED_FIELDS, ...COLLAPSIBLE_FIELDS, ...ADVANCED_FIELDS]
 
 const STANDARD_FIELDS = [
   'id',
@@ -141,6 +197,31 @@ const OPERATORS = [
 ]
 
 const NO_VALUE_OPERATORS = ['is_empty', 'is_not_empty']
+
+// Operators that have a "_field" variant in the resolver — i.e. the RHS can
+// be either a literal value or another product-field reference. Used to
+// decide whether the Værdi / Felt toggle is shown.
+const MODE_AWARE_OPERATORS = new Set([
+  'equals',
+  'not_equals',
+  'greater_than',
+  'less_than',
+])
+
+// Strips the "_field" suffix so the dropdown can render and select a single
+// option for both `less_than` and `less_than_field`.
+function baseOperator(op: string): string {
+  return op.endsWith('_field') ? op.slice(0, -'_field'.length) : op
+}
+function isFieldOperator(op: string): boolean {
+  return op.endsWith('_field')
+}
+// Build the effective stored operator from a base + mode. Non-mode-aware
+// operators ignore the field mode and stay as their base form.
+function withOperatorMode(base: string, mode: 'value' | 'field'): string {
+  if (mode === 'field' && MODE_AWARE_OPERATORS.has(base)) return `${base}_field`
+  return base
+}
 
 // ── Shared styles ──────────────────────────────────────────────────────────
 
@@ -305,6 +386,12 @@ function evalPreviewCond(
     case 'less_than':    return parseFloat(v) < parseFloat(cond.value)
     case 'is_empty':     return !v
     case 'is_not_empty': return !!v
+    // *_field variants resolve the RHS as a field reference. Mirrors evalCond
+    // in feedGenerator so the preview matches the generated output exactly.
+    case 'less_than_field':    return parseFloat(v) < parseFloat(resolveClientField(cond.value, product, marketUrl, feedMode))
+    case 'greater_than_field': return parseFloat(v) > parseFloat(resolveClientField(cond.value, product, marketUrl, feedMode))
+    case 'equals_field':       return v === resolveClientField(cond.value, product, marketUrl, feedMode)
+    case 'not_equals_field':   return v !== resolveClientField(cond.value, product, marketUrl, feedMode)
     default:             return true
   }
 }
@@ -328,12 +415,20 @@ function computePreviewValue(
     }
     if (!result) {
       const eb = onlyIf.else
-      value =
-        eb.type === 'static'
-          ? eb.value
-          : eb.type === 'field'
-            ? resolveClientField(eb.value, product, marketUrl, feedMode)
-            : ''
+      if (eb.type === 'static') value = eb.value
+      else if (eb.type === 'field')
+        value = resolveClientField(eb.value, product, marketUrl, feedMode)
+      else if (eb.type === 'combine') {
+        value = (eb.blocks ?? [])
+          .map((b) =>
+            b.type === 'field'
+              ? resolveClientField(b.value, product, marketUrl, feedMode)
+              : b.value
+          )
+          .join('')
+      } else {
+        value = ''
+      }
     }
   }
 
@@ -1037,6 +1132,54 @@ function ConfigEditor({
   }
 }
 
+// ── ConditionModeToggle ────────────────────────────────────────────────────
+
+// Inline pill-toggle inside the value column of an OnlyIf condition row.
+// "Værdi" stores the bare operator (literal compare); "Felt" appends "_field"
+// so the resolver treats the RHS as a product-field path.
+function ConditionModeToggle({
+  mode,
+  onChange,
+}: {
+  mode: 'value' | 'field'
+  onChange: (m: 'value' | 'field') => void
+}) {
+  return (
+    <div
+      className="inline-flex shrink-0 self-stretch overflow-hidden"
+      style={{
+        border: '1px solid var(--color-border-secondary)',
+        borderRadius: '4px',
+      }}
+      role="group"
+      aria-label="Sammenligning mod værdi eller felt"
+    >
+      {(['value', 'field'] as const).map((m, idx) => {
+        const active = mode === m
+        return (
+          <button
+            key={m}
+            type="button"
+            onClick={() => mode !== m && onChange(m)}
+            style={{
+              padding: '0 10px',
+              fontSize: '11px',
+              fontWeight: 500,
+              borderLeft: idx > 0 ? '1px solid var(--color-border-secondary)' : 'none',
+              background: active ? '#6c5ce7' : '#ffffff',
+              color: active ? '#ffffff' : 'var(--color-text-secondary)',
+              cursor: active ? 'default' : 'pointer',
+              transition: 'background 0.12s ease, color 0.12s ease',
+            }}
+          >
+            {m === 'value' ? 'Værdi' : 'Felt'}
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
 // ── OnlyIfEditor ───────────────────────────────────────────────────────────
 
 function OnlyIfEditor({
@@ -1060,6 +1203,28 @@ function OnlyIfEditor({
 
       {conditions.map((cond, i) => {
         const noVal = NO_VALUE_OPERATORS.includes(cond.operator)
+        const base = baseOperator(cond.operator)
+        const mode: 'value' | 'field' = isFieldOperator(cond.operator) ? 'field' : 'value'
+        const showModeToggle = !noVal && MODE_AWARE_OPERATORS.has(base)
+
+        function setBase(nextBase: string) {
+          const next = [...conditions]
+          next[i] = {
+            ...next[i],
+            operator: withOperatorMode(nextBase, mode),
+            value: '',
+          }
+          setConditions(next)
+        }
+        function setMode(nextMode: 'value' | 'field') {
+          const next = [...conditions]
+          next[i] = {
+            ...next[i],
+            operator: withOperatorMode(base, nextMode),
+            value: '',
+          }
+          setConditions(next)
+        }
         return (
           <div key={i} className="flex gap-2 items-start">
             {i === 0 ? (
@@ -1091,12 +1256,8 @@ function OnlyIfEditor({
               />
             </div>
             <select
-              value={cond.operator}
-              onChange={(e) => {
-                const next = [...conditions]
-                next[i] = { ...next[i], operator: e.target.value, value: '' }
-                setConditions(next)
-              }}
+              value={base}
+              onChange={(e) => setBase(e.target.value)}
               className={miniSel}
               style={{ flex: '0 0 140px' }}
             >
@@ -1105,18 +1266,35 @@ function OnlyIfEditor({
               ))}
             </select>
             {!noVal && (
-              <div className="flex-1 min-w-0">
-                <input
-                  type="text"
-                  value={cond.value}
-                  onChange={(e) => {
-                    const next = [...conditions]
-                    next[i] = { ...next[i], value: e.target.value }
-                    setConditions(next)
-                  }}
-                  placeholder="Værdi..."
-                  className={inp}
-                />
+              <div className="flex-1 min-w-0 flex gap-1.5 items-stretch">
+                {showModeToggle && (
+                  <ConditionModeToggle mode={mode} onChange={setMode} />
+                )}
+                <div className="flex-1 min-w-0">
+                  {mode === 'field' ? (
+                    <FieldSelect
+                      value={cond.value}
+                      onChange={(v) => {
+                        const next = [...conditions]
+                        next[i] = { ...next[i], value: v }
+                        setConditions(next)
+                      }}
+                      allFields={allFields}
+                    />
+                  ) : (
+                    <input
+                      type="text"
+                      value={cond.value}
+                      onChange={(e) => {
+                        const next = [...conditions]
+                        next[i] = { ...next[i], value: e.target.value }
+                        setConditions(next)
+                      }}
+                      placeholder="Værdi..."
+                      className={inp}
+                    />
+                  )}
+                </div>
               </div>
             )}
             {conditions.length > 1 && (
@@ -1154,13 +1332,21 @@ function OnlyIfEditor({
         <span className={lbl}>ELLERS</span>
         <select
           value={elseBranch.type}
-          onChange={(e) => setElse({ type: e.target.value as ElseBranch['type'], value: '' })}
+          onChange={(e) => {
+            const next = e.target.value as ElseBranch['type']
+            if (next === 'combine') {
+              setElse({ type: 'combine', blocks: [] })
+            } else {
+              setElse({ type: next, value: '' })
+            }
+          }}
           className={miniSel}
           style={{ flex: '0 0 120px' }}
         >
           <option value="empty">Tom</option>
           <option value="static">Statisk</option>
           <option value="field">Felt</option>
+          <option value="combine">Kombiner</option>
         </select>
         <div className="flex-1 min-w-0">
           {elseBranch.type === 'static' && (
@@ -1181,6 +1367,13 @@ function OnlyIfEditor({
           )}
           {elseBranch.type === 'empty' && (
             <span className="text-sm text-gray-400 italic pt-1.5">Feltet efterlades tomt</span>
+          )}
+          {elseBranch.type === 'combine' && (
+            <CombineChipsEditor
+              blocks={elseBranch.blocks ?? []}
+              allFields={allFields}
+              onChange={(next) => setElse({ type: 'combine', blocks: next })}
+            />
           )}
         </div>
       </div>
@@ -1208,6 +1401,8 @@ function FieldRow({
   onTypeChange,
   onConfigChange,
   previewValue,
+  onRemove,
+  onPreview,
 }: {
   field: string
   state: FieldState
@@ -1215,7 +1410,16 @@ function FieldRow({
   onTypeChange: (t: MappingType) => void
   onConfigChange: (c: Config) => void
   previewValue: string | null
+  // When set, renders a small × button next to the field name. Used by the
+  // Custom-felter section to delete a user-defined field.
+  onRemove?: () => void
+  // When set, renders a hover-only "Preview" button that opens the field
+  // preview sidebar for this row.
+  onPreview?: () => void
 }) {
+  // Strip the "custom:" prefix when displaying user-defined fields. The
+  // underlying mapping key keeps the prefix so feedGenerator can detect it.
+  const displayField = field.startsWith('custom:') ? field.slice('custom:'.length) : field
   const onlyIf = state.config.onlyIf as OnlyIf | undefined
   const [showOnlyIf, setShowOnlyIf] = useState(!!onlyIf?.conditions?.length)
   const hasConditions = onlyIf?.conditions?.some((c) => c.field) ?? false
@@ -1240,10 +1444,67 @@ function FieldRow({
   }
 
   return (
-    <div className="px-3.5 py-2.5">
+    <div className="px-3.5 py-2.5 group">
       <div className="flex items-start gap-3">
         <div className="w-52 pt-1.5 shrink-0">
-          <code className="ff-mono" style={{ fontSize: '11px', color: 'var(--color-text-primary)' }}>{field}</code>
+          <div className="flex items-center justify-between gap-1.5">
+            <code
+              className="ff-mono truncate"
+              style={{ fontSize: '11px', color: 'var(--color-text-primary)' }}
+            >
+              {displayField}
+            </code>
+            <div className="flex items-center gap-1 shrink-0">
+              {onPreview && (
+                <button
+                  type="button"
+                  onClick={onPreview}
+                  title="Vis preview af feltet på alle produkter"
+                  className="opacity-0 group-hover:opacity-100 focus:opacity-100"
+                  style={{
+                    padding: '2px 6px',
+                    fontSize: '10px',
+                    fontWeight: 500,
+                    border: '1px solid var(--color-border-secondary)',
+                    borderRadius: '4px',
+                    background: '#ffffff',
+                    color: 'var(--color-accent)',
+                    cursor: 'pointer',
+                    transition: 'opacity 0.12s ease',
+                    lineHeight: 1.2,
+                  }}
+                >
+                  Preview
+                </button>
+              )}
+              {onRemove && (
+                <button
+                  type="button"
+                  onClick={onRemove}
+                  aria-label={`Slet feltet ${displayField}`}
+                  title="Slet custom felt"
+                  style={{
+                    width: '18px',
+                    height: '18px',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    padding: 0,
+                    border: '1px solid var(--color-border-tertiary)',
+                    borderRadius: '4px',
+                    background: 'transparent',
+                    color: 'var(--color-text-tertiary)',
+                    cursor: 'pointer',
+                    fontSize: '12px',
+                    lineHeight: 1,
+                    flexShrink: 0,
+                  }}
+                >
+                  ×
+                </button>
+              )}
+            </div>
+          </div>
         </div>
         <div className="w-40 shrink-0">
           <select
@@ -1529,36 +1790,97 @@ function ShopifyFieldsModal({
 
 // ── ProductPickerModal ─────────────────────────────────────────────────────
 
+// Self-fetching picker: pulls products from /api/products with server-side
+// search + 20-per-page pagination. Replaces the old "load everything client
+// side and filter locally" approach so it scales to feeds with thousands of
+// products.
+const PICKER_PAGE_SIZE = 20
+
 function ProductPickerModal({
-  products,
-  loading,
+  feedId,
   onSelect,
   onClose,
 }: {
-  products: PreviewProduct[]
-  loading: boolean
+  feedId: string
   onSelect: (p: PreviewProduct) => void
   onClose: () => void
 }) {
   const [search, setSearch] = useState('')
+  const [debouncedSearch, setDebouncedSearch] = useState('')
+  const [products, setProducts] = useState<PreviewProduct[]>([])
+  const [total, setTotal] = useState(0)
+  const [totalPages, setTotalPages] = useState(1)
+  const [page, setPage] = useState(1)
+  const [loading, setLoading] = useState(false)
 
-  const filtered = useMemo(() => {
-    const q = search.toLowerCase()
-    return !q ? products : products.filter((p) => p.title.toLowerCase().includes(q))
-  }, [products, search])
+  // 300 ms debounce on the typed query → committed search.
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearch(search.trim()), 300)
+    return () => clearTimeout(t)
+  }, [search])
+
+  // New search resets paging so the user lands on results from page 1.
+  useEffect(() => {
+    setPage(1)
+  }, [debouncedSearch])
+
+  useEffect(() => {
+    let cancelled = false
+    setLoading(true)
+    const params = new URLSearchParams({
+      feedId,
+      page: String(page),
+      pageSize: String(PICKER_PAGE_SIZE),
+    })
+    if (debouncedSearch) params.set('search', debouncedSearch)
+
+    fetch(`/api/products?${params.toString()}`)
+      .then(async (res) => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`)
+        return (await res.json()) as {
+          products?: PreviewProduct[]
+          total?: number
+          totalPages?: number
+        }
+      })
+      .then((data) => {
+        if (cancelled) return
+        setProducts(data.products ?? [])
+        setTotal(data.total ?? 0)
+        setTotalPages(Math.max(1, data.totalPages ?? 1))
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setProducts([])
+          setTotal(0)
+          setTotalPages(1)
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false)
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [feedId, debouncedSearch, page])
 
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center pt-20 px-4" onClick={onClose}>
+    <div
+      className="fixed inset-0 z-50 flex items-start justify-center pt-20 px-4"
+      onClick={onClose}
+    >
       <div className="absolute inset-0 bg-black/20" />
       <div
-        className="relative bg-white rounded-xl shadow-xl border border-gray-200 w-full max-w-md overflow-hidden"
+        className="relative bg-white rounded-xl shadow-xl border border-gray-200 w-full max-w-md overflow-hidden flex flex-col"
+        style={{ maxHeight: 'calc(100vh - 120px)' }}
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="p-4 border-b border-gray-100">
+        <div className="p-4 border-b border-gray-100 shrink-0">
           <p className="text-xs font-medium text-gray-500 mb-2">Vælg preview produkt</p>
           <input
             type="search"
-            placeholder="Søg produkt…"
+            placeholder="Søg titel, leverandør, handle, tags…"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             // eslint-disable-next-line jsx-a11y/no-autofocus
@@ -1566,13 +1888,18 @@ function ProductPickerModal({
             className="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
           />
         </div>
-        <div className="max-h-80 overflow-y-auto">
-          {loading ? (
+        <div
+          className="overflow-y-auto"
+          style={{ flex: 1, opacity: loading && products.length > 0 ? 0.6 : 1 }}
+        >
+          {loading && products.length === 0 ? (
             <div className="p-8 text-center text-sm text-gray-400">Henter produkter…</div>
-          ) : filtered.length === 0 ? (
-            <div className="p-8 text-center text-sm text-gray-400">Ingen produkter fundet</div>
+          ) : products.length === 0 ? (
+            <div className="p-8 text-center text-sm text-gray-400">
+              {debouncedSearch ? 'Ingen produkter matcher søgningen' : 'Ingen produkter fundet'}
+            </div>
           ) : (
-            filtered.map((p) => (
+            products.map((p) => (
               <button
                 key={p.id}
                 onClick={() => onSelect(p)}
@@ -1596,6 +1923,32 @@ function ProductPickerModal({
             ))
           )}
         </div>
+        {total > 0 && (
+          <div
+            className="px-4 py-2.5 flex items-center justify-between gap-2 shrink-0"
+            style={{ borderTop: '1px solid var(--color-border-tertiary)' }}
+          >
+            <button
+              type="button"
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+              disabled={loading || page <= 1}
+              className="ff-btn-secondary"
+            >
+              Forrige
+            </button>
+            <span style={{ fontSize: '11px', color: 'var(--color-text-tertiary)' }}>
+              Side {page} af {totalPages} · {total} produkter
+            </span>
+            <button
+              type="button"
+              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+              disabled={loading || page >= totalPages}
+              className="ff-btn-secondary"
+            >
+              Næste
+            </button>
+          </div>
+        )}
       </div>
     </div>
   )
@@ -1765,6 +2118,1006 @@ function AISuggestionsModal({
   )
 }
 
+// ── SectionPanel ───────────────────────────────────────────────────────────
+
+// Renders a single mapping section. Supports two modes:
+//   - static (collapsible=false): always-open header (used for required +
+//     tilføjede felter)
+//   - collapsible: header is a button that toggles open/closed
+function SectionPanel({
+  title,
+  fields,
+  mappings,
+  allFields,
+  onTypeChange,
+  onConfigChange,
+  previewProduct,
+  previewValues,
+  onPreview,
+  collapsible = false,
+  open = true,
+  onToggle,
+}: {
+  title: string
+  fields: string[]
+  mappings: Record<string, FieldState>
+  allFields: string[]
+  onTypeChange: (field: string, type: MappingType) => void
+  onConfigChange: (field: string, config: Config) => void
+  previewProduct: PreviewProduct | null
+  previewValues: Record<string, string | null>
+  onPreview: (field: string) => void
+  collapsible?: boolean
+  open?: boolean
+  onToggle?: () => void
+}) {
+  const sectionMapped = fields.filter((f) => mappings[f]?.type !== '' && mappings[f]?.type).length
+
+  const counter = (
+    <span
+      className="ff-mono"
+      style={{
+        fontSize: '10px',
+        color: 'var(--color-text-tertiary)',
+        textTransform: 'none',
+        letterSpacing: 0,
+      }}
+    >
+      {sectionMapped}/{fields.length} mappet
+    </span>
+  )
+
+  const headerContent = (
+    <>
+      <div className="flex items-center gap-2 flex-1 min-w-0">
+        {collapsible && (
+          <svg
+            width="10"
+            height="10"
+            viewBox="0 0 12 12"
+            fill="none"
+            style={{
+              transform: open ? 'rotate(90deg)' : 'rotate(0deg)',
+              transition: 'transform 0.12s ease',
+              color: 'var(--color-text-tertiary)',
+              flexShrink: 0,
+            }}
+          >
+            <path d="M4 2l4 4-4 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        )}
+        <span>{title}</span>
+      </div>
+      {counter}
+    </>
+  )
+
+  return (
+    <div className="ff-panel">
+      {collapsible ? (
+        <button
+          type="button"
+          onClick={onToggle}
+          className="ff-panel-header"
+          style={{ width: '100%', cursor: 'pointer', textAlign: 'left' }}
+        >
+          {headerContent}
+        </button>
+      ) : (
+        <div className="ff-panel-header">{headerContent}</div>
+      )}
+      {open && (
+        <div
+          style={{ borderColor: 'var(--color-border-tertiary)' }}
+          className="divide-y divide-[var(--color-border-tertiary)]"
+        >
+          {fields.map((field) => (
+            <FieldRow
+              key={field}
+              field={field}
+              state={mappings[field] ?? { type: '', config: {} }}
+              allFields={allFields}
+              onTypeChange={(type) => onTypeChange(field, type)}
+              onConfigChange={(config) => onConfigChange(field, config)}
+              previewValue={previewProduct ? (previewValues[field] ?? null) : null}
+              onPreview={() => onPreview(field)}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── CustomFieldsSection ────────────────────────────────────────────────────
+
+// Renders the "Custom felter" panel: list of user-defined fields (with the
+// "custom:" prefix kept on the underlying mapping key) plus an inline
+// add-form. Validation rules: alphanumeric + underscore only, no spaces.
+function CustomFieldsSection({
+  customFields,
+  mappings,
+  allFields,
+  onTypeChange,
+  onConfigChange,
+  previewProduct,
+  previewValues,
+  onAdd,
+  onRemove,
+  onPreview,
+}: {
+  customFields: string[]
+  mappings: Record<string, FieldState>
+  allFields: string[]
+  onTypeChange: (field: string, type: MappingType) => void
+  onConfigChange: (field: string, config: Config) => void
+  previewProduct: PreviewProduct | null
+  previewValues: Record<string, string | null>
+  onAdd: (rawName: string) => string | null
+  onRemove: (field: string) => void
+  onPreview: (field: string) => void
+}) {
+  const [showAdd, setShowAdd] = useState(false)
+  const [name, setName] = useState('')
+  const [error, setError] = useState<string | null>(null)
+
+  const mappedCount = customFields.filter((f) => mappings[f]?.type !== '' && mappings[f]?.type).length
+
+  function tryAdd() {
+    const err = onAdd(name)
+    if (err) {
+      setError(err)
+      return
+    }
+    setName('')
+    setError(null)
+    setShowAdd(false)
+  }
+
+  function cancelAdd() {
+    setShowAdd(false)
+    setName('')
+    setError(null)
+  }
+
+  return (
+    <div className="ff-panel">
+      <div className="ff-panel-header">
+        <span>Custom felter</span>
+        <span
+          className="ff-mono"
+          style={{
+            fontSize: '10px',
+            color: 'var(--color-text-tertiary)',
+            textTransform: 'none',
+            letterSpacing: 0,
+          }}
+        >
+          {mappedCount}/{customFields.length} mappet
+        </span>
+      </div>
+      <div
+        style={{ borderColor: 'var(--color-border-tertiary)' }}
+        className="divide-y divide-[var(--color-border-tertiary)]"
+      >
+        {customFields.length === 0 && !showAdd && (
+          <div
+            className="px-3.5 py-3"
+            style={{ fontSize: '11px', color: 'var(--color-text-tertiary)' }}
+          >
+            Ingen custom felter endnu. Tilføj felter der ikke findes i Google Shopping standarden —
+            de skrives til feedet uden <code className="ff-mono">g:</code> præfix.
+          </div>
+        )}
+
+        {customFields.map((field) => (
+          <FieldRow
+            key={field}
+            field={field}
+            state={mappings[field] ?? { type: '', config: {} }}
+            allFields={allFields}
+            onTypeChange={(type) => onTypeChange(field, type)}
+            onConfigChange={(config) => onConfigChange(field, config)}
+            previewValue={previewProduct ? (previewValues[field] ?? null) : null}
+            onRemove={() => onRemove(field)}
+            onPreview={() => onPreview(field)}
+          />
+        ))}
+
+        {showAdd ? (
+          <div className="px-3.5 py-3 space-y-2">
+            <div className="flex items-center gap-2 flex-wrap">
+              <input
+                type="text"
+                autoFocus
+                value={name}
+                onChange={(e) => {
+                  setName(e.target.value)
+                  if (error) setError(null)
+                }}
+                placeholder="f.eks. vintage_year"
+                className={`${inp} ff-mono`}
+                style={{ flex: '1 1 280px', minWidth: 0, maxWidth: '320px' }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault()
+                    tryAdd()
+                  } else if (e.key === 'Escape') {
+                    e.preventDefault()
+                    cancelAdd()
+                  }
+                }}
+              />
+              <button type="button" onClick={tryAdd} className="ff-btn-primary">
+                Tilføj
+              </button>
+              <button type="button" onClick={cancelAdd} className="ff-btn-secondary">
+                Annuller
+              </button>
+            </div>
+            {error && (
+              <p style={{ fontSize: '11px', color: 'var(--color-badge-danger-text)' }}>{error}</p>
+            )}
+            <p style={{ fontSize: '11px', color: 'var(--color-text-tertiary)' }}>
+              Kun bogstaver, tal og underscore. Feltet skrives til XML som{' '}
+              <code className="ff-mono">{`<${name.trim() || 'feltnavn'}>…</${name.trim() || 'feltnavn'}>`}</code>
+            </p>
+          </div>
+        ) : (
+          <div className="px-3.5 py-2.5">
+            <button
+              type="button"
+              onClick={() => setShowAdd(true)}
+              className="ff-btn-secondary"
+            >
+              ＋ Tilføj custom felt
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// ── AddFieldModal ──────────────────────────────────────────────────────────
+
+function AddFieldModal({
+  addedFields,
+  onAdd,
+  onRemove,
+  onClose,
+}: {
+  addedFields: string[]
+  onAdd: (field: string) => void
+  onRemove: (field: string) => void
+  onClose: () => void
+}) {
+  const [search, setSearch] = useState('')
+  const addedSet = new Set(addedFields)
+  const q = search.trim().toLowerCase()
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-start justify-center pt-12 px-4"
+      onClick={onClose}
+    >
+      <div className="absolute inset-0" style={{ background: 'rgba(0,0,0,0.3)' }} />
+      <div
+        className="relative ff-panel w-full"
+        style={{
+          maxWidth: '640px',
+          maxHeight: 'calc(100vh - 96px)',
+          display: 'flex',
+          flexDirection: 'column',
+        }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div
+          className="ff-panel-header"
+          style={{ textTransform: 'none', letterSpacing: 0, fontSize: '12px' }}
+        >
+          <span style={{ fontSize: '13px', fontWeight: 500, color: 'var(--color-text-primary)' }}>
+            Tilføj felt
+          </span>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Luk"
+            style={{
+              fontSize: '16px',
+              lineHeight: 1,
+              color: 'var(--color-text-tertiary)',
+              background: 'transparent',
+              border: 'none',
+              cursor: 'pointer',
+              padding: '2px 6px',
+            }}
+          >
+            ×
+          </button>
+        </div>
+
+        <div className="px-3.5 py-3" style={{ borderBottom: '1px solid var(--color-border-tertiary)' }}>
+          <input
+            type="search"
+            autoFocus
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Søg felt…"
+            className={inp}
+          />
+        </div>
+
+        <div style={{ overflowY: 'auto', flex: 1 }}>
+          {ADVANCED_CATEGORIES.map((category) => {
+            const matching = q
+              ? category.fields.filter((f) => f.toLowerCase().includes(q))
+              : category.fields
+            if (matching.length === 0) return null
+            return (
+              <div key={category.title}>
+                <div
+                  className="ff-label"
+                  style={{
+                    padding: '8px 14px',
+                    background: 'var(--color-background-tertiary)',
+                    borderTop: '1px solid var(--color-border-tertiary)',
+                    borderBottom: '1px solid var(--color-border-tertiary)',
+                  }}
+                >
+                  {category.title}
+                </div>
+                {matching.map((field) => {
+                  const isAdded = addedSet.has(field)
+                  return (
+                    <div
+                      key={field}
+                      className="flex items-center justify-between gap-3"
+                      style={{
+                        padding: '8px 14px',
+                        borderBottom: '1px solid var(--color-border-tertiary)',
+                      }}
+                    >
+                      <code
+                        className="ff-mono"
+                        style={{ fontSize: '11px', color: 'var(--color-text-primary)' }}
+                      >
+                        {field}
+                      </code>
+                      {isAdded ? (
+                        <button
+                          type="button"
+                          onClick={() => onRemove(field)}
+                          className="ff-btn-secondary"
+                          style={{ color: 'var(--color-badge-danger-text)' }}
+                        >
+                          Fjern
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => onAdd(field)}
+                          className="ff-btn-primary"
+                        >
+                          Tilføj
+                        </button>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+            )
+          })}
+        </div>
+
+        <div
+          className="px-3.5 py-3 flex justify-end"
+          style={{ borderTop: '1px solid var(--color-border-tertiary)' }}
+        >
+          <button type="button" onClick={onClose} className="ff-btn-secondary">
+            Luk
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ── FieldPreviewSidebar ────────────────────────────────────────────────────
+
+// All filtering, searching and pagination is delegated to /api/products. The
+// sidebar holds 20 products at a time and steps with Forrige/Næste.
+
+type FilterKey =
+  | 'vendor'
+  | 'product_type'
+  | 'status'
+  | 'in_stock'
+  | 'tags'
+  | 'sku'
+  | 'title'
+  | 'handle'
+  | 'price_gt'
+  | 'price_lt'
+
+type FilterDef = {
+  key: FilterKey
+  label: string
+  kind: 'text' | 'number' | 'select'
+  placeholder?: string
+  options?: { value: string; label: string }[]
+  formatChip: (value: string) => string
+}
+
+const FILTER_DEFS: FilterDef[] = [
+  {
+    key: 'vendor',
+    label: 'Leverandør',
+    kind: 'text',
+    placeholder: 'f.eks. Acme Inc.',
+    formatChip: (v) => `Leverandør: ${v}`,
+  },
+  {
+    key: 'product_type',
+    label: 'Produkttype',
+    kind: 'text',
+    placeholder: 'f.eks. Vin',
+    formatChip: (v) => `Produkttype: ${v}`,
+  },
+  {
+    key: 'status',
+    label: 'Status',
+    kind: 'select',
+    options: [
+      { value: 'active', label: 'Aktiv' },
+      { value: 'inactive', label: 'Inaktiv' },
+    ],
+    formatChip: (v) => `Status: ${v === 'active' ? 'Aktiv' : 'Inaktiv'}`,
+  },
+  {
+    key: 'in_stock',
+    label: 'Tilgængelighed',
+    kind: 'select',
+    options: [
+      { value: 'true', label: 'På lager' },
+      { value: 'false', label: 'Ikke på lager' },
+    ],
+    formatChip: (v) =>
+      `Tilgængelighed: ${v === 'true' ? 'På lager' : 'Ikke på lager'}`,
+  },
+  {
+    key: 'tags',
+    label: 'Tags indeholder',
+    kind: 'text',
+    placeholder: 'f.eks. vintage',
+    formatChip: (v) => `Tags indeholder: ${v}`,
+  },
+  {
+    key: 'price_gt',
+    label: 'Pris større end',
+    kind: 'number',
+    placeholder: 'f.eks. 100',
+    formatChip: (v) => `Pris > ${v}`,
+  },
+  {
+    key: 'price_lt',
+    label: 'Pris mindre end',
+    kind: 'number',
+    placeholder: 'f.eks. 500',
+    formatChip: (v) => `Pris < ${v}`,
+  },
+  {
+    key: 'sku',
+    label: 'SKU indeholder',
+    kind: 'text',
+    placeholder: 'f.eks. ABC',
+    formatChip: (v) => `SKU indeholder: ${v}`,
+  },
+  {
+    key: 'title',
+    label: 'Titel indeholder',
+    kind: 'text',
+    placeholder: 'f.eks. vintage',
+    formatChip: (v) => `Titel indeholder: ${v}`,
+  },
+  {
+    key: 'handle',
+    label: 'Handle indeholder',
+    kind: 'text',
+    placeholder: 'f.eks. red-shirt',
+    formatChip: (v) => `Handle indeholder: ${v}`,
+  },
+]
+
+const SIDEBAR_PAGE_SIZE = 20
+
+function FieldPreviewSidebar({
+  field,
+  state,
+  feedId,
+  feedMode,
+  marketUrl,
+  onClose,
+}: {
+  field: string
+  state: FieldState
+  feedId: string
+  feedMode: 'product' | 'variant'
+  marketUrl: string | null
+  onClose: () => void
+}) {
+  const [search, setSearch] = useState('')
+  const [debouncedSearch, setDebouncedSearch] = useState('')
+  const [filters, setFilters] = useState<Partial<Record<FilterKey, string>>>({})
+  const [products, setProducts] = useState<PreviewProduct[]>([])
+  const [total, setTotal] = useState(0)
+  const [totalPages, setTotalPages] = useState(1)
+  const [page, setPage] = useState(1)
+  const [loading, setLoading] = useState(false)
+
+  // 'menu' = filter-type picker open; FilterKey = editing that filter's value.
+  const [adding, setAdding] = useState<null | 'menu' | FilterKey>(null)
+
+  // Debounce free-text search → committed query.
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearch(search.trim()), 300)
+    return () => clearTimeout(t)
+  }, [search])
+
+  // Reset to page 1 whenever search or filters change so the user doesn't
+  // land on an out-of-range page after narrowing.
+  const filtersKey = useMemo(() => JSON.stringify(filters), [filters])
+  useEffect(() => {
+    setPage(1)
+  }, [debouncedSearch, filtersKey])
+
+  // Esc closes the panel (when no inline editor is open).
+  useEffect(() => {
+    function handleKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') {
+        if (adding) setAdding(null)
+        else onClose()
+      }
+    }
+    document.addEventListener('keydown', handleKey)
+    return () => document.removeEventListener('keydown', handleKey)
+  }, [onClose, adding])
+
+  // Fetch products — server-side search, filter and pagination.
+  useEffect(() => {
+    let cancelled = false
+    setLoading(true)
+    const params = new URLSearchParams({
+      feedId,
+      page: String(page),
+      pageSize: String(SIDEBAR_PAGE_SIZE),
+    })
+    if (debouncedSearch) params.set('search', debouncedSearch)
+    for (const [k, v] of Object.entries(filters)) {
+      if (v) params.set(k, v)
+    }
+
+    fetch(`/api/products?${params.toString()}`)
+      .then(async (res) => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`)
+        return (await res.json()) as {
+          products?: PreviewProduct[]
+          total?: number
+          totalPages?: number
+        }
+      })
+      .then((data) => {
+        if (cancelled) return
+        setProducts(data.products ?? [])
+        setTotal(data.total ?? 0)
+        setTotalPages(Math.max(1, data.totalPages ?? 1))
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setProducts([])
+          setTotal(0)
+          setTotalPages(1)
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false)
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [feedId, debouncedSearch, filters, page])
+
+  function applyFilter(key: FilterKey, value: string) {
+    if (!value) return
+    setFilters((prev) => ({ ...prev, [key]: value }))
+    setAdding(null)
+  }
+  function removeFilter(key: FilterKey) {
+    setFilters((prev) => {
+      const { [key]: _removed, ...rest } = prev
+      return rest
+    })
+  }
+
+  const hasMapping = state.type !== ''
+
+  let mappingLabel = 'Ingen mapping'
+  if (state.type === 'FIELD') mappingLabel = `FIELD → ${(state.config.field as string) ?? ''}`
+  else if (state.type === 'STATIC')
+    mappingLabel = `STATIC → "${(state.config.value as string) ?? ''}"`
+  else if (state.type) mappingLabel = state.type
+
+  const displayField = field.startsWith('custom:') ? field.slice('custom:'.length) : field
+
+  const activeFilterEntries = Object.entries(filters).filter(([, v]) => v) as [
+    FilterKey,
+    string,
+  ][]
+  const availableForAdding = FILTER_DEFS.filter((d) => !filters[d.key])
+
+  return (
+    <>
+      <div
+        className="fixed inset-0 z-40"
+        style={{ background: 'rgba(0,0,0,0.3)' }}
+        onClick={onClose}
+      />
+      <aside
+        className="fixed top-0 right-0 z-50 h-screen flex flex-col"
+        style={{
+          width: '380px',
+          background: '#ffffff',
+          borderLeft: '1px solid var(--color-border-tertiary)',
+          boxShadow: '-2px 0 12px rgba(0,0,0,0.06)',
+        }}
+      >
+        {/* Header */}
+        <div
+          className="px-3.5 py-3 flex items-start justify-between gap-2"
+          style={{ borderBottom: '1px solid var(--color-border-tertiary)' }}
+        >
+          <div className="min-w-0">
+            <code
+              className="ff-mono"
+              style={{ fontSize: '13px', fontWeight: 600, color: 'var(--color-text-primary)' }}
+            >
+              {displayField}
+            </code>
+            <p
+              className="mt-0.5"
+              style={{ fontSize: '11px', color: 'var(--color-text-tertiary)' }}
+            >
+              {mappingLabel}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Luk preview"
+            style={{
+              fontSize: '18px',
+              lineHeight: 1,
+              color: 'var(--color-text-tertiary)',
+              background: 'transparent',
+              border: 'none',
+              cursor: 'pointer',
+              padding: '2px 6px',
+            }}
+          >
+            ×
+          </button>
+        </div>
+
+        {/* Search + active filter chips + add-filter UI */}
+        <div
+          className="px-3.5 py-3 space-y-2"
+          style={{ borderBottom: '1px solid var(--color-border-tertiary)' }}
+        >
+          <input
+            type="search"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Søg titel, leverandør, handle, tags…"
+            className={inp}
+          />
+
+          {activeFilterEntries.length > 0 && (
+            <div className="flex flex-wrap gap-1.5">
+              {activeFilterEntries.map(([key, value]) => {
+                const def = FILTER_DEFS.find((d) => d.key === key)
+                if (!def) return null
+                return (
+                  <span
+                    key={key}
+                    className="ff-badge ff-badge-accent"
+                    style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+                  >
+                    <span>{def.formatChip(value)}</span>
+                    <button
+                      type="button"
+                      onClick={() => removeFilter(key)}
+                      aria-label={`Fjern filter ${def.label}`}
+                      style={{
+                        background: 'transparent',
+                        border: 'none',
+                        color: 'inherit',
+                        cursor: 'pointer',
+                        padding: 0,
+                        fontSize: '12px',
+                        lineHeight: 1,
+                        opacity: 0.7,
+                      }}
+                    >
+                      ×
+                    </button>
+                  </span>
+                )
+              })}
+            </div>
+          )}
+
+          {adding === null && availableForAdding.length > 0 && (
+            <button
+              type="button"
+              onClick={() => setAdding('menu')}
+              className="ff-btn-secondary"
+              style={{ fontSize: '11px' }}
+            >
+              ＋ Tilføj filter
+            </button>
+          )}
+
+          {adding === 'menu' && (
+            <div
+              className="ff-panel"
+              style={{
+                background: '#ffffff',
+                border: '1px solid var(--color-border-secondary)',
+                borderRadius: '6px',
+                maxHeight: '220px',
+                overflowY: 'auto',
+              }}
+            >
+              {availableForAdding.map((def) => (
+                <button
+                  key={def.key}
+                  type="button"
+                  onClick={() => setAdding(def.key)}
+                  style={{
+                    display: 'block',
+                    width: '100%',
+                    textAlign: 'left',
+                    padding: '6px 10px',
+                    fontSize: '11px',
+                    background: 'transparent',
+                    border: 'none',
+                    cursor: 'pointer',
+                    color: 'var(--color-text-primary)',
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.background = 'var(--color-background-secondary)'
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.background = 'transparent'
+                  }}
+                >
+                  {def.label}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {adding && adding !== 'menu' && (
+            <FilterValueEditor
+              def={FILTER_DEFS.find((d) => d.key === adding)!}
+              onConfirm={(value) => applyFilter(adding, value)}
+              onCancel={() => setAdding(null)}
+            />
+          )}
+        </div>
+
+        {/* Result count */}
+        <div
+          className="px-3.5 py-2"
+          style={{
+            background: 'var(--color-background-tertiary)',
+            borderBottom: '1px solid var(--color-border-tertiary)',
+            fontSize: '11px',
+            color: 'var(--color-text-tertiary)',
+          }}
+        >
+          {loading && products.length === 0
+            ? 'Henter…'
+            : `${total} produkter · side ${page} af ${totalPages}`}
+        </div>
+
+        {/* List */}
+        <div style={{ overflowY: 'auto', flex: 1, opacity: loading ? 0.6 : 1 }}>
+          {products.length === 0 && !loading ? (
+            <p
+              className="px-3.5 py-6 text-center"
+              style={{ fontSize: '11px', color: 'var(--color-text-tertiary)' }}
+            >
+              Ingen produkter matcher
+            </p>
+          ) : (
+            products.map((p) => {
+              const value = hasMapping
+                ? computePreviewValue(state, p, marketUrl, feedMode)
+                : ''
+              return (
+                <div
+                  key={p.id}
+                  className="px-3.5 py-2.5 flex items-start gap-3"
+                  style={{ borderBottom: '1px solid var(--color-border-tertiary)' }}
+                >
+                  <div className="flex-1 min-w-0">
+                    <p
+                      className="truncate"
+                      style={{ fontSize: '12px', color: 'var(--color-text-primary)' }}
+                      title={p.title}
+                    >
+                      {p.title || '—'}
+                    </p>
+                    <p
+                      className="ff-mono mt-0.5 truncate"
+                      style={{ fontSize: '10px', color: 'var(--color-text-tertiary)' }}
+                    >
+                      {p.handle}
+                    </p>
+                  </div>
+                  <div
+                    className="ff-mono shrink-0 text-right"
+                    style={{
+                      fontSize: '11px',
+                      maxWidth: '160px',
+                      wordBreak: 'break-all',
+                    }}
+                  >
+                    {value === '' ? (
+                      <span
+                        style={{
+                          color: 'var(--color-text-tertiary)',
+                          fontStyle: 'italic',
+                        }}
+                      >
+                        —
+                      </span>
+                    ) : value === '__AI__' ? (
+                      <span className="ff-badge ff-badge-accent">AI</span>
+                    ) : (
+                      <span style={{ color: 'var(--color-accent)' }}>{value}</span>
+                    )}
+                  </div>
+                </div>
+              )
+            })
+          )}
+        </div>
+
+        {/* Pagination */}
+        <div
+          className="px-3.5 py-2.5 flex items-center justify-between gap-2"
+          style={{ borderTop: '1px solid var(--color-border-tertiary)' }}
+        >
+          <button
+            type="button"
+            onClick={() => setPage((p) => Math.max(1, p - 1))}
+            disabled={loading || page <= 1}
+            className="ff-btn-secondary"
+          >
+            Forrige
+          </button>
+          <span style={{ fontSize: '11px', color: 'var(--color-text-tertiary)' }}>
+            Side {page} af {totalPages}
+          </span>
+          <button
+            type="button"
+            onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+            disabled={loading || page >= totalPages}
+            className="ff-btn-secondary"
+          >
+            Næste
+          </button>
+        </div>
+      </aside>
+    </>
+  )
+}
+
+function FilterValueEditor({
+  def,
+  onConfirm,
+  onCancel,
+}: {
+  def: FilterDef
+  onConfirm: (value: string) => void
+  onCancel: () => void
+}) {
+  const [value, setValue] = useState('')
+
+  function tryConfirm() {
+    const v = value.trim()
+    if (!v) return
+    onConfirm(v)
+  }
+
+  return (
+    <div
+      className="flex flex-wrap items-center gap-2 p-2"
+      style={{
+        background: 'var(--color-background-tertiary)',
+        border: '1px solid var(--color-border-tertiary)',
+        borderRadius: '6px',
+      }}
+    >
+      <span
+        style={{
+          fontSize: '11px',
+          fontWeight: 500,
+          color: 'var(--color-text-secondary)',
+          flexShrink: 0,
+        }}
+      >
+        {def.label}
+      </span>
+      {def.kind === 'select' ? (
+        <select
+          autoFocus
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          className={sel}
+          style={{ flex: '1 1 120px', minWidth: 0 }}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault()
+              tryConfirm()
+            }
+          }}
+        >
+          <option value="">— Vælg —</option>
+          {def.options?.map((o) => (
+            <option key={o.value} value={o.value}>
+              {o.label}
+            </option>
+          ))}
+        </select>
+      ) : (
+        <input
+          type={def.kind === 'number' ? 'number' : 'text'}
+          autoFocus
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          placeholder={def.placeholder}
+          className={inp}
+          style={{ flex: '1 1 120px', minWidth: 0 }}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault()
+              tryConfirm()
+            } else if (e.key === 'Escape') {
+              e.preventDefault()
+              onCancel()
+            }
+          }}
+        />
+      )}
+      <button
+        type="button"
+        onClick={tryConfirm}
+        disabled={!value.trim()}
+        className="ff-btn-primary"
+      >
+        Tilføj
+      </button>
+      <button type="button" onClick={onCancel} className="ff-btn-secondary">
+        Annuller
+      </button>
+    </div>
+  )
+}
+
 // ── Main component ─────────────────────────────────────────────────────────
 
 type InitialMapping = {
@@ -1790,7 +3143,10 @@ export default function MappingClient({
     const init: Record<string, FieldState> = {}
     for (const f of ALL_FIELDS) init[f] = { type: '', config: {} }
     for (const m of initialMappings) {
-      if (!ALL_FIELDS.includes(m.google_field)) continue
+      const isCustom = m.google_field.startsWith('custom:')
+      // Accept Google fields we know about plus any custom field. Unknown
+      // Google-namespace fields are skipped (legacy data).
+      if (!isCustom && !ALL_FIELDS.includes(m.google_field)) continue
       let cfg: Config = {}
       try {
         const raw = m.config
@@ -1803,9 +3159,96 @@ export default function MappingClient({
     return init
   })
 
+  // Custom user-defined fields (stored with "custom:" prefix in the DB).
+  // Auto-seeded from initialMappings so saved custom fields show up on next
+  // load. removedCustomFields holds keys that the user has × deleted in this
+  // session — they're sent with empty mapping_type on save so the DB row
+  // disappears, then cleared on success.
+  const [customFields, setCustomFields] = useState<string[]>(() => {
+    const set = new Set<string>()
+    for (const m of initialMappings) {
+      if (m.google_field.startsWith('custom:') && m.mapping_type !== '') {
+        set.add(m.google_field)
+      }
+    }
+    return Array.from(set)
+  })
+  const [removedCustomFields, setRemovedCustomFields] = useState<string[]>([])
+
+  function addCustomField(rawName: string): string | null {
+    const trimmed = rawName.trim()
+    if (!trimmed) return 'Feltnavn må ikke være tomt'
+    if (!/^[a-zA-Z0-9_]+$/.test(trimmed)) {
+      return 'Kun bogstaver, tal og underscore tilladt — ingen mellemrum eller særtegn'
+    }
+    const fullKey = `custom:${trimmed}`
+    if (customFields.includes(fullKey)) return 'Feltet findes allerede'
+    setCustomFields((prev) => [...prev, fullKey])
+    setMappings((prev) => ({ ...prev, [fullKey]: { type: '', config: {} } }))
+    setRemovedCustomFields((prev) => prev.filter((f) => f !== fullKey))
+    return null
+  }
+
+  function removeCustomField(field: string) {
+    setCustomFields((prev) => prev.filter((f) => f !== field))
+    setRemovedCustomFields((prev) => (prev.includes(field) ? prev : [...prev, field]))
+  }
+
   const [isPending, startTransition] = useTransition()
   const [status, setStatus] = useState<'idle' | 'saved' | 'error'>('idle')
   const [errorMsg, setErrorMsg] = useState('')
+
+  // ── Section / "added fields" state ──────────────────────────────────────
+  // Advanced fields the user has explicitly surfaced via the "+ Tilføj felt"
+  // modal. Seeded from initialMappings so a saved-but-advanced mapping shows
+  // up automatically on next load.
+  const [addedFields, setAddedFields] = useState<string[]>(() => {
+    const seen = new Set<string>()
+    for (const m of initialMappings) {
+      if (m.mapping_type !== '' && ADVANCED_FIELDS.includes(m.google_field)) {
+        seen.add(m.google_field)
+      }
+    }
+    return Array.from(seen)
+  })
+
+  // Collapsible-section open state. Auto-opens any section that contains a
+  // field with a saved mapping; otherwise the section starts collapsed.
+  const [openSections, setOpenSections] = useState<Set<string>>(() => {
+    const mappedSet = new Set(
+      initialMappings.filter((m) => m.mapping_type !== '').map((m) => m.google_field)
+    )
+    const open = new Set<string>()
+    for (const section of COLLAPSIBLE_SECTIONS) {
+      if (section.fields.some((f) => mappedSet.has(f))) open.add(section.title)
+    }
+    return open
+  })
+
+  const [showAddFieldModal, setShowAddFieldModal] = useState(false)
+
+  // Field preview sidebar — set to a Google field name when the user clicks
+  // the hover "Preview" button on a row; null when the sidebar is closed.
+  const [previewSidebarField, setPreviewSidebarField] = useState<string | null>(null)
+
+  function toggleSection(title: string) {
+    setOpenSections((prev) => {
+      const next = new Set(prev)
+      if (next.has(title)) next.delete(title)
+      else next.add(title)
+      return next
+    })
+  }
+
+  function addField(field: string) {
+    setAddedFields((prev) => (prev.includes(field) ? prev : [...prev, field]))
+  }
+
+  function removeAddedField(field: string) {
+    setAddedFields((prev) => prev.filter((f) => f !== field))
+    // Also clear the saved mapping so the next save deletes it from the DB.
+    setMappings((prev) => ({ ...prev, [field]: { type: '', config: {} } }))
+  }
 
   // ── AI auto-mapping state ────────────────────────────────────────────────
   const [isFetchingAI, setIsFetchingAI] = useState(false)
@@ -1817,10 +3260,33 @@ export default function MappingClient({
     setIsFetchingAI(true)
     setAIError(null)
     try {
-      const res = await fetch(`/api/mapping/ai-suggest?feedId=${encodeURIComponent(feedId)}`, { method: 'POST' })
-      const data = await res.json() as { suggestions?: AISuggestion[]; error?: string }
+      // Live mappings — includes the user's unsaved edits. Only the active
+      // (non-empty mapping_type) entries are sent so the AI knows which
+      // fields are off-limits.
+      const existingMappings = Object.entries(mappings)
+        .filter(([, state]) => state.type !== '')
+        .map(([field, state]) => ({
+          google_field: field,
+          mapping_type: state.type,
+          config: state.config,
+        }))
+      const mappedSet = new Set(existingMappings.map((m) => m.google_field))
+
+      const res = await fetch(
+        `/api/mapping/ai-suggest?feedId=${encodeURIComponent(feedId)}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ existingMappings }),
+        }
+      )
+      const data = (await res.json()) as { suggestions?: AISuggestion[]; error?: string }
       if (data.error) throw new Error(data.error)
-      setAISuggestions(data.suggestions ?? [])
+
+      // Defense in depth: drop suggestions for fields already mapped, even if
+      // the route filter missed something.
+      const filtered = (data.suggestions ?? []).filter((s) => !mappedSet.has(s.google_field))
+      setAISuggestions(filtered)
       setShowAIModal(true)
     } catch (err) {
       setAIError(err instanceof Error ? err.message : 'AI-analyse fejlede')
@@ -1893,14 +3359,15 @@ export default function MappingClient({
   const previewValues = useMemo<Record<string, string | null>>(() => {
     if (!previewProduct) return {}
     const result: Record<string, string | null> = {}
-    for (const field of ALL_FIELDS) {
+    const fieldsToPreview = [...ALL_FIELDS, ...customFields]
+    for (const field of fieldsToPreview) {
       const state = mappings[field]
       result[field] = state?.type
         ? computePreviewValue(state, previewProduct, marketUrl, feedMode)
         : null
     }
     return result
-  }, [mappings, previewProduct, marketUrl, feedMode])
+  }, [mappings, previewProduct, marketUrl, feedMode, customFields])
 
   // ── Field helpers ────────────────────────────────────────────────────────
   const allFields: string[] = [
@@ -1908,7 +3375,12 @@ export default function MappingClient({
     ...metafields.map((m) => `metafield:${m.namespace}.${m.key}`),
   ]
 
-  const mappedCount = Object.values(mappings).filter((s) => s.type !== '').length
+  // Visible fields = required + collapsible + user-added advanced fields +
+  // custom user-defined fields. The topbar denominator reflects what the
+  // user can see in the UI, not every field ALL_FIELDS could in theory contain.
+  const visibleFields = [...REQUIRED_FIELDS, ...COLLAPSIBLE_FIELDS, ...addedFields, ...customFields]
+  const mappedCount = visibleFields.filter((f) => mappings[f]?.type !== '' && mappings[f]?.type).length
+  const totalVisibleFields = visibleFields.length
 
   // Set of all Shopify fields referenced by at least one active mapping —
   // recomputed when mappings change. Drives the "Mappet"/"Ikke mappet" badges
@@ -1939,17 +3411,32 @@ export default function MappingClient({
 
   function handleSave() {
     startTransition(async () => {
-      const entries: MappingEntry[] = ALL_FIELDS.map((f) => ({
-        google_field: f,
-        mapping_type: mappings[f]?.type ?? '',
-        config: mappings[f]?.config ?? {},
-      }))
+      const entries: MappingEntry[] = [
+        ...ALL_FIELDS.map((f) => ({
+          google_field: f,
+          mapping_type: mappings[f]?.type ?? '',
+          config: mappings[f]?.config ?? {},
+        })),
+        ...customFields.map((f) => ({
+          google_field: f,
+          mapping_type: mappings[f]?.type ?? '',
+          config: mappings[f]?.config ?? {},
+        })),
+        // × deleted custom fields — sent with empty mapping_type so saveMappings
+        // deletes the existing DB row.
+        ...removedCustomFields.map((f) => ({
+          google_field: f,
+          mapping_type: '',
+          config: {},
+        })),
+      ]
       const result = await saveMappings(feedId, entries)
       if (result.error) {
         setErrorMsg(result.error)
         setStatus('error')
       } else {
         setStatus('saved')
+        setRemovedCustomFields([])
         setTimeout(() => setStatus('idle'), 2500)
       }
     })
@@ -1962,7 +3449,7 @@ export default function MappingClient({
         <div className="flex items-center gap-3">
           <h1 className="ff-topbar-title">{feedName} · Mapping</h1>
           <span style={{ fontSize: '11px', color: 'var(--color-text-tertiary)' }}>
-            {mappedCount} af {ALL_FIELDS.length} mappet
+            {mappedCount} af {totalVisibleFields} mappet
           </span>
         </div>
         <div className="flex items-center gap-2 flex-wrap justify-end">
@@ -2051,38 +3538,82 @@ export default function MappingClient({
       </header>
 
       <main className="px-4 py-4 max-w-6xl space-y-3">
-        {SECTIONS.map((section) => {
-          const sectionMapped = section.fields.filter((f) => mappings[f]?.type !== '').length
-          return (
-            <div key={section.title} className="ff-panel">
-              <div className="ff-panel-header">
-                <span>{section.title}</span>
-                <span className="ff-mono" style={{ fontSize: '10px', color: 'var(--color-text-tertiary)', textTransform: 'none', letterSpacing: 0 }}>
-                  {sectionMapped}/{section.fields.length}
-                </span>
-              </div>
-              <div style={{ borderColor: 'var(--color-border-tertiary)' }} className="divide-y divide-[var(--color-border-tertiary)]">
-                {section.fields.map((field) => (
-                  <FieldRow
-                    key={field}
-                    field={field}
-                    state={mappings[field] ?? { type: '', config: {} }}
-                    allFields={allFields}
-                    onTypeChange={(type) => updateType(field, type)}
-                    onConfigChange={(config) => updateConfig(field, config)}
-                    previewValue={previewProduct ? (previewValues[field] ?? null) : null}
-                  />
-                ))}
-              </div>
-            </div>
-          )
-        })}
+        {/* Required — always visible, never collapsed */}
+        <SectionPanel
+          title="Obligatoriske"
+          fields={[...REQUIRED_FIELDS]}
+          mappings={mappings}
+          allFields={allFields}
+          onTypeChange={updateType}
+          onConfigChange={updateConfig}
+          previewProduct={previewProduct}
+          previewValues={previewValues}
+          onPreview={setPreviewSidebarField}
+        />
+
+        {/* Collapsible sections */}
+        {COLLAPSIBLE_SECTIONS.map((section) => (
+          <SectionPanel
+            key={section.title}
+            title={section.title}
+            fields={section.fields}
+            mappings={mappings}
+            allFields={allFields}
+            onTypeChange={updateType}
+            onConfigChange={updateConfig}
+            previewProduct={previewProduct}
+            previewValues={previewValues}
+            onPreview={setPreviewSidebarField}
+            collapsible
+            open={openSections.has(section.title)}
+            onToggle={() => toggleSection(section.title)}
+          />
+        ))}
+
+        {/* User-added advanced fields */}
+        {addedFields.length > 0 && (
+          <SectionPanel
+            title="Tilføjede felter"
+            fields={addedFields}
+            mappings={mappings}
+            allFields={allFields}
+            onTypeChange={updateType}
+            onConfigChange={updateConfig}
+            previewProduct={previewProduct}
+            previewValues={previewValues}
+            onPreview={setPreviewSidebarField}
+          />
+        )}
+
+        {/* + Tilføj felt */}
+        <div className="flex justify-center pt-2">
+          <button
+            type="button"
+            onClick={() => setShowAddFieldModal(true)}
+            className="ff-btn-secondary"
+          >
+            ＋ Tilføj felt
+          </button>
+        </div>
+
+        {/* Custom (non-Google) fields — always rendered, sits at the bottom */}
+        <CustomFieldsSection
+          customFields={customFields}
+          mappings={mappings}
+          allFields={allFields}
+          onTypeChange={updateType}
+          onConfigChange={updateConfig}
+          previewProduct={previewProduct}
+          previewValues={previewValues}
+          onAdd={addCustomField}
+          onRemove={removeCustomField}
+          onPreview={setPreviewSidebarField}
+        />
       </main>
 
       {showPicker && (
         <ProductPickerModal
-          products={allProducts}
-          loading={loadingProducts}
+          feedId={feedId}
           onSelect={(p) => {
             setPreviewProduct(p)
             setShowPicker(false)
@@ -2109,6 +3640,26 @@ export default function MappingClient({
           marketUrl={marketUrl}
           usedFields={usedFieldsSet}
           onClose={() => setShowFieldsModal(false)}
+        />
+      )}
+
+      {showAddFieldModal && (
+        <AddFieldModal
+          addedFields={addedFields}
+          onAdd={addField}
+          onRemove={removeAddedField}
+          onClose={() => setShowAddFieldModal(false)}
+        />
+      )}
+
+      {previewSidebarField && (
+        <FieldPreviewSidebar
+          field={previewSidebarField}
+          state={mappings[previewSidebarField] ?? { type: '', config: {} }}
+          feedId={feedId}
+          feedMode={feedMode}
+          marketUrl={marketUrl}
+          onClose={() => setPreviewSidebarField(null)}
         />
       )}
     </div>

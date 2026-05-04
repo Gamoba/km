@@ -18,7 +18,11 @@ type Config = Record<string, unknown>
 type CombineBlock = { type: 'field' | 'text'; value: string }
 type FindReplacePair = { find: string; replace: string }
 type Condition = { field: string; operator: string; value: string; logic: 'AND' | 'OR' | null }
-type ElseBranch = { type: 'empty' | 'static' | 'field'; value: string }
+// ELSE branch supports four shapes. `empty` / `static` / `field` use `value`;
+// `combine` reuses the same block list as a top-level COMBINE mapping.
+type ElseBranch =
+  | { type: 'empty' | 'static' | 'field'; value: string }
+  | { type: 'combine'; blocks: CombineBlock[] }
 type OnlyIf = { conditions: Condition[]; else: ElseBranch }
 
 type FeedMapping = {
@@ -141,6 +145,13 @@ function evalCond(cond: Condition, product: SupabaseProduct, marketUrl: string |
     case 'less_than':    return parseFloat(v) < parseFloat(cond.value)
     case 'is_empty':     return !v
     case 'is_not_empty': return !!v
+    // *_field variants resolve the RHS as a field reference instead of a
+    // literal — used by default mappings that compare two product fields
+    // (e.g. price < compare_at_price for sale detection).
+    case 'less_than_field':    return parseFloat(v) < parseFloat(resolveField(cond.value, product, marketUrl))
+    case 'greater_than_field': return parseFloat(v) > parseFloat(resolveField(cond.value, product, marketUrl))
+    case 'equals_field':       return v === resolveField(cond.value, product, marketUrl)
+    case 'not_equals_field':   return v !== resolveField(cond.value, product, marketUrl)
     default:             return true
   }
 }
@@ -249,12 +260,15 @@ async function resolvedValue(
     const conditionMet = evaluateOnlyIf(onlyIf, product, marketUrl)
     if (!conditionMet) {
       const eb = onlyIf.else
-      value =
-        eb.type === 'static'
-          ? eb.value
-          : eb.type === 'field'
-            ? resolveField(eb.value, product, marketUrl)
-            : ''
+      if (eb.type === 'static') value = eb.value
+      else if (eb.type === 'field') value = resolveField(eb.value, product, marketUrl)
+      else if (eb.type === 'combine') {
+        value = (eb.blocks ?? [])
+          .map((b) => (b.type === 'field' ? resolveField(b.value, product, marketUrl) : b.value))
+          .join('')
+      } else {
+        value = ''
+      }
     }
   }
 
@@ -322,6 +336,14 @@ function applyFeedFilters(
 }
 
 function xmlLine(field: string, value: string): string {
+  // User-defined custom fields (saved as "custom:foo") are written without
+  // the g: namespace — they're not part of the Google Shopping spec, so the
+  // tag is just the bare name. Validation client-side restricts the suffix
+  // to [A-Za-z0-9_], which is XML-safe.
+  if (field.startsWith('custom:')) {
+    const tag = field.slice('custom:'.length)
+    return `      <g:${tag}>${xmlEscape(value)}</g:${tag}>`
+  }
   return `      <g:${field}>${xmlEscape(value)}</g:${field}>`
 }
 

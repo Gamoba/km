@@ -63,9 +63,43 @@ export function getDefaultMappings(
       },
     },
     {
-      // "<price> <currency>" — Google requires a space between number and
-      // ISO currency code, hence the literal text block in the middle.
+      // price emits the *original* price (compare_at_price) when the product
+      // is on sale, otherwise the regular price. "On sale" = price <
+      // compare_at_price evaluated via the new less_than_field operator.
+      // Google requires a space between number and ISO currency code, hence
+      // the literal text blocks in the middle.
       google_field: 'price',
+      mapping_type: 'COMBINE',
+      config: {
+        blocks: [
+          { type: 'field', value: 'variants[0].compare_at_price' },
+          { type: 'text', value: ' ' },
+          { type: 'field', value: 'variants[0].currency' },
+        ],
+        onlyIf: {
+          conditions: [
+            {
+              field: 'variants[0].price',
+              operator: 'less_than_field',
+              value: 'variants[0].compare_at_price',
+              logic: null,
+            },
+          ],
+          else: {
+            type: 'combine',
+            blocks: [
+              { type: 'field', value: 'variants[0].price' },
+              { type: 'text', value: ' ' },
+              { type: 'field', value: 'variants[0].currency' },
+            ],
+          },
+        },
+      },
+    },
+    {
+      // sale_price emits the discounted price only when the product is on
+      // sale; otherwise empty (Google ignores empty sale_price).
+      google_field: 'sale_price',
       mapping_type: 'COMBINE',
       config: {
         blocks: [
@@ -73,6 +107,17 @@ export function getDefaultMappings(
           { type: 'text', value: ' ' },
           { type: 'field', value: 'variants[0].currency' },
         ],
+        onlyIf: {
+          conditions: [
+            {
+              field: 'variants[0].price',
+              operator: 'less_than_field',
+              value: 'variants[0].compare_at_price',
+              logic: null,
+            },
+          ],
+          else: { type: 'empty', value: '' },
+        },
       },
     },
     {

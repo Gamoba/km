@@ -46,10 +46,9 @@ const SHOPIFY_STANDARD_FIELDS = [
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
-function formatExistingMappings(mappings: ExistingMapping[]): string {
-  const active = mappings.filter((m) => m.mapping_type && m.mapping_type !== '')
-  if (!active.length) return '  (ingen eksisterende mappings)'
-  return active
+function formatMappedFieldsList(mappings: ExistingMapping[]): string {
+  if (!mappings.length) return '  (ingen — alle felter er åbne for forslag)'
+  return mappings
     .map((m) => {
       if (m.mapping_type === 'FIELD') return `  ${m.google_field} → FIELD: ${m.config.field ?? '?'}`
       if (m.mapping_type === 'STATIC') return `  ${m.google_field} → STATIC: "${m.config.value ?? ''}"`
@@ -115,7 +114,7 @@ function buildPrompt(
       : '  (ingen metafields fundet)'
 
   const standardFieldsText = SHOPIFY_STANDARD_FIELDS.map((f) => `  ${f}`).join('\n')
-  const existingText = formatExistingMappings(existingMappings)
+  const existingText = formatMappedFieldsList(existingMappings)
   const productsText = buildProductText(products)
 
   const idInstruction =
@@ -132,8 +131,8 @@ Produktdata sprog: ${locale}
 
 Produkttitler, beskrivelser og tags i eksemplerne nedenfor er på sproget "${locale}".
 
-=== EKSISTERENDE MAPPINGS ===
-Disse felter er allerede mappet. Foreslå kun ændringer hvis den nuværende mapping er forkert:
+=== ALLEREDE MAPPEDE FELTER (SPRING OVER) ===
+Disse felter er allerede mappet og må IKKE overskrives. Foreslå INGEN mapping for nogen af disse felter — heller ikke hvis du mener den nuværende er forkert:
 ${existingText}
 
 === GOOGLE SHOPPING FELTKRAV ===
@@ -175,7 +174,7 @@ ${productsText}
 
 === INSTRUKTIONER ===
 1. Analyser feltnavne og dataformater — ikke hvad butikken sælger
-2. Foreslå KUN felter der ikke allerede er korrekt mappet
+2. Foreslå KUN forslag for felter der IKKE allerede er på listen ovenfor — overskriv aldrig en eksisterende mapping
 3. Spring "availability" over — kræver beregning
 4. Brug "high" confidence kun ved direkte teknisk match mellem feltnavne eller dataformater
 5. Returner KUN JSON array — ingen forklaring, ingen markdown, ingen kommentarer
@@ -217,18 +216,31 @@ export async function POST(req: Request) {
   const owned = await getOwnedFeed(user.id, feedId)
   if (!owned) return NextResponse.json({ error: 'Feed ikke fundet' }, { status: 404 })
 
+  // Existing mappings come from the client (live state — may include unsaved
+  // changes the user just made). The route used to load these from
+  // feed_mappings, but that ignored uncommitted edits. The client only sends
+  // mappings with a non-empty mapping_type; we treat anything else as
+  // "open for suggestion".
+  const body = (await req.json().catch(() => ({}))) as {
+    existingMappings?: ExistingMapping[]
+  }
+  const activeMappings: ExistingMapping[] = Array.isArray(body.existingMappings)
+    ? body.existingMappings.filter(
+        (m) => m && typeof m === 'object' && m.mapping_type && m.mapping_type !== ''
+      )
+    : []
+  const mappedFields = new Set(activeMappings.map((m) => m.google_field))
+
   const db = adminClient()
 
   const [
     { data: settingsData },
     { data: shopSettingsData },
-    { data: mappingsData },
     { data: metafieldRows },
     { data: productRows },
   ] = await Promise.all([
     db.from('feed_settings').select('feed_mode').eq('feed_id', feedId).maybeSingle(),
     db.from('shop_settings').select('currency, selected_locale').eq('feed_id', feedId).maybeSingle(),
-    db.from('feed_mappings').select('google_field, mapping_type, config').eq('feed_id', feedId),
     db.from('product_metafields').select('namespace, key').eq('feed_id', feedId).limit(200),
     db.from('products').select('*, metafields:product_metafields(*)').eq('feed_id', feedId).eq('status', 'active').limit(50),
   ])
@@ -249,9 +261,7 @@ export async function POST(req: Request) {
   const allProducts = (productRows ?? []) as SupabaseProduct[]
   const sampleProducts = [...allProducts].sort(() => Math.random() - 0.5).slice(0, 5)
 
-  const existingMappings = (mappingsData ?? []) as ExistingMapping[]
-
-  const prompt = buildPrompt(feedMode, currency, locale, existingMappings, uniqueMetafields, sampleProducts)
+  const prompt = buildPrompt(feedMode, currency, locale, activeMappings, uniqueMetafields, sampleProducts)
 
   const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
 
@@ -275,5 +285,13 @@ export async function POST(req: Request) {
 
   if (!Array.isArray(suggestions)) suggestions = []
 
-  return NextResponse.json({ suggestions })
+  // Defense in depth: drop any suggestion targeting an already-mapped field
+  // even if Claude ignored the prompt instruction.
+  const filtered = suggestions.filter((s) => {
+    if (!s || typeof s !== 'object') return false
+    const gf = (s as { google_field?: unknown }).google_field
+    return typeof gf === 'string' && !mappedFields.has(gf)
+  })
+
+  return NextResponse.json({ suggestions: filtered })
 }
