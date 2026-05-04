@@ -20,10 +20,11 @@ const FEED_NAV = [
 ] as const
 
 const TOP_NAV = [
-  { label: 'Feeds', href: '/dashboard', icon: 'grid' },
+  { label: 'Feeds', href: '/', icon: 'grid' },
 ] as const
 
 function active(pathname: string, href: string) {
+  if (href === '/') return pathname === '/'
   return pathname === href || pathname.startsWith(href + '/')
 }
 

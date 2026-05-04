@@ -32,7 +32,7 @@ export async function signIn(
     return { ...prevState, error: error.message }
   }
 
-  redirect('/dashboard')
+  redirect('/')
 }
 
 export async function signUp(
