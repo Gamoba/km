@@ -114,13 +114,21 @@ body {
   font-weight: 500;
   border-radius: 4px;
   border: 1px solid #6c5ce7;
-  transition: background 0.12s ease;
+  transition: background-color 150ms ease, border-color 150ms ease, opacity 150ms ease;
   cursor: pointer;
   white-space: nowrap;
 }
 .ff-btn-primary:hover:not(:disabled) {
   background: #5a4bd1;
   border-color: #5a4bd1;
+}
+.ff-btn-primary:active:not(:disabled) {
+  background: #4a3bc1;
+  border-color: #4a3bc1;
+}
+.ff-btn-primary:focus-visible {
+  outline: 2px solid #6c5ce7;
+  outline-offset: 2px;
 }
 .ff-btn-primary:disabled {
   opacity: 0.5;
@@ -138,7 +146,7 @@ body {
   font-weight: 500;
   border-radius: 4px;
   border: 1px solid var(--color-border-secondary);
-  transition: background 0.12s ease, border-color 0.12s ease;
+  transition: background-color 150ms ease, border-color 150ms ease, opacity 150ms ease;
   cursor: pointer;
   white-space: nowrap;
 }
@@ -146,7 +154,41 @@ body {
   background: var(--color-background-secondary);
   border-color: var(--color-border-primary);
 }
+.ff-btn-secondary:focus-visible {
+  outline: 2px solid #6c5ce7;
+  outline-offset: 2px;
+}
 .ff-btn-secondary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Ghost / icon-button variant — no border, no background until hover. */
+.ff-btn-ghost {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 4px 8px;
+  background: transparent;
+  color: var(--color-text-tertiary);
+  font-size: 12px;
+  font-weight: 500;
+  border-radius: 4px;
+  border: none;
+  transition: background-color 150ms ease, color 150ms ease, opacity 150ms ease;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.ff-btn-ghost:hover:not(:disabled) {
+  background: var(--color-background-secondary);
+  color: var(--color-text-primary);
+}
+.ff-btn-ghost:focus-visible {
+  outline: 2px solid #6c5ce7;
+  outline-offset: 2px;
+}
+.ff-btn-ghost:disabled {
   opacity: 0.5;
   cursor: not-allowed;
 }
@@ -160,11 +202,17 @@ body {
   border-radius: 4px;
   color: var(--color-text-primary);
   outline: none;
-  transition: border-color 0.12s ease, box-shadow 0.12s ease;
+  transition: border-color 150ms ease, box-shadow 150ms ease;
 }
 .ff-input:focus {
   border-color: var(--color-accent);
   box-shadow: 0 0 0 2px rgba(108, 92, 231, 0.15);
+  outline: none;
+}
+.ff-input:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  background: var(--color-background-secondary);
 }
 
 .ff-select {
@@ -176,11 +224,77 @@ body {
   border-radius: 4px;
   color: var(--color-text-primary);
   outline: none;
-  transition: border-color 0.12s ease, box-shadow 0.12s ease;
+  cursor: pointer;
+  transition: border-color 150ms ease, box-shadow 150ms ease;
 }
 .ff-select:focus {
   border-color: var(--color-accent);
   box-shadow: 0 0 0 2px rgba(108, 92, 231, 0.15);
+  outline: none;
+}
+.ff-select:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  background: var(--color-background-secondary);
+}
+
+/* ── Interactive primitives ─────────────────────────────────────────────── */
+
+/* Hoverable table row — used by ff-table tbody rows that aren't expanded. */
+.ff-table-row {
+  transition: background-color 150ms ease;
+}
+.ff-table-row:hover {
+  background: var(--color-background-secondary);
+}
+
+/* Sidebar / top-nav item. Inactive items hover to a faint accent tint. */
+.ff-nav-item {
+  cursor: pointer;
+  transition: background-color 150ms ease, color 150ms ease;
+}
+.ff-nav-item:hover:not(.ff-nav-item-active) {
+  background: rgba(108, 92, 231, 0.1);
+  color: #ffffff;
+}
+
+/* Card with subtle lift on hover. Used for clickable feed cards on the
+ * dashboard. */
+.ff-card {
+  transition: box-shadow 150ms ease, transform 150ms ease, border-color 150ms ease;
+}
+.ff-card:hover {
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+  transform: translateY(-1px);
+  border-color: var(--color-border-secondary);
+}
+
+/* Small × / icon button on chips and tag-like elements. */
+.ff-chip-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  background: transparent;
+  border: none;
+  color: inherit;
+  opacity: 0.65;
+  cursor: pointer;
+  font-size: 13px;
+  line-height: 1;
+  border-radius: 3px;
+  transition: background-color 150ms ease, opacity 150ms ease;
+}
+.ff-chip-close:hover {
+  opacity: 1;
+  background: rgba(0, 0, 0, 0.08);
+}
+.ff-chip-close:focus-visible {
+  outline: 2px solid #6c5ce7;
+  outline-offset: 1px;
+  opacity: 1;
 }
 
 .ff-badge {

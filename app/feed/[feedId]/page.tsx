@@ -2,14 +2,16 @@ import { redirect, notFound } from 'next/navigation'
 import { createSupabaseServerClient } from '@/lib/supabase-server'
 import { adminDb, getOwnedFeed } from '@/lib/feeds'
 import { FeedClient } from '@/app/feed/FeedClient'
-import { countFilteredProducts } from '@/lib/feedGenerator'
 import type { ValidationIssue, ValidationResult } from '@/lib/feedValidator'
 
-// Total Google Shopping fields the mapping UI exposes (8 sections in
-// MappingClient.SECTIONS). The progress bar on the dashboard reads
-// "X af TOTAL_GOOGLE_FIELDS felter mappet".
+// Total Google Shopping fields the mapping UI exposes. Drives the progress
+// bar in the status overview ("X of TOTAL_GOOGLE_FIELDS fields mapped").
 const TOTAL_GOOGLE_FIELDS = 39
 
+// LAG 1 — server fetches everything except the slow paginated
+// countFilteredProducts call. Per-feed included/excluded counts are
+// computed client-side via /api/feeds/[feedId]/counts so the overview
+// renders immediately.
 export default async function FeedDetailPage({
   params,
 }: {
@@ -32,7 +34,6 @@ export default async function FeedDetailPage({
     { data: settingsData },
     { data: cacheInfo },
     mappingsCountRes,
-    filteredCounts,
     { data: lastSyncRow },
   ] = await Promise.all([
     db.from('feed_settings').select('feed_mode').eq('feed_id', feedId).maybeSingle(),
@@ -46,7 +47,6 @@ export default async function FeedDetailPage({
       .select('feed_id', { count: 'exact', head: true })
       .eq('feed_id', feedId)
       .neq('mapping_type', ''),
-    countFilteredProducts(feedId),
     db
       .from('products')
       .select('synced_at')
@@ -77,10 +77,6 @@ export default async function FeedDetailPage({
       ? { status: cachedStatus, issues: cachedIssues, productsChecked: 0 }
       : null
 
-  const total = filteredCounts.total
-  const included = filteredCounts.included
-  const excluded = Math.max(0, total - included)
-
   return (
     <FeedClient
       feedId={feedId}
@@ -89,8 +85,6 @@ export default async function FeedDetailPage({
       initialValidation={initialValidation}
       mappingCount={mappingsCountRes.count ?? 0}
       totalFields={TOTAL_GOOGLE_FIELDS}
-      includedCount={included}
-      excludedCount={excluded}
       lastSynced={lastSyncRow?.synced_at ?? null}
     />
   )

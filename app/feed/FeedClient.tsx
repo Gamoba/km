@@ -27,8 +27,6 @@ export function FeedClient({
   initialValidation,
   mappingCount,
   totalFields,
-  includedCount,
-  excludedCount,
   lastSynced,
 }: {
   feedId: string
@@ -37,10 +35,31 @@ export function FeedClient({
   initialValidation: ValidationResult | null
   mappingCount: number
   totalFields: number
-  includedCount: number
-  excludedCount: number
   lastSynced: string | null
 }) {
+  // LAG 2 — included / excluded product counts come from the slow paginated
+  // countFilteredProducts call. Fetched client-side so the overview renders
+  // without waiting on it; null = still loading.
+  const [includedCount, setIncludedCount] = useState<number | null>(null)
+  const [excludedCount, setExcludedCount] = useState<number | null>(null)
+  useEffect(() => {
+    let cancelled = false
+    fetch(`/api/feeds/${encodeURIComponent(feedId)}/counts`)
+      .then((r) => r.json())
+      .then((data: { included?: number; excluded?: number }) => {
+        if (cancelled) return
+        setIncludedCount(data.included ?? 0)
+        setExcludedCount(data.excluded ?? 0)
+      })
+      .catch(() => {
+        if (cancelled) return
+        setIncludedCount(0)
+        setExcludedCount(0)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [feedId])
   const searchParams = useSearchParams()
   const showSyncBanner = searchParams.get('syncing') === '1'
 
@@ -331,8 +350,8 @@ function StatisticsSection({
   lastGenerated,
 }: {
   feedItemCount: number | null
-  includedCount: number
-  excludedCount: number
+  includedCount: number | null
+  excludedCount: number | null
   lastSynced: string | null
   lastGenerated: string | null
 }) {
@@ -341,8 +360,8 @@ function StatisticsSection({
       <div className="ff-panel-header">Statistics</div>
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 p-3.5">
         <StatCard label="Items in feed" value={feedItemCount != null ? String(feedItemCount) : '—'} />
-        <StatCard label="Included products" value={String(includedCount)} />
-        <StatCard label="Excluded products" value={String(excludedCount)} />
+        <StatCard label="Included products" value={includedCount != null ? String(includedCount) : '—'} />
+        <StatCard label="Excluded products" value={excludedCount != null ? String(excludedCount) : '—'} />
         <StatCard label="Last synced" value={formatDateTime(lastSynced)} />
         <StatCard label="Last generated" value={formatDateTime(lastGenerated)} />
       </div>

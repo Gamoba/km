@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useMemo } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import type { PreviewData, PreviewRow } from '@/lib/feedGenerator'
 
 const REQUIRED = new Set(['id', 'title', 'description', 'link', 'image_link', 'price', 'availability'])
@@ -243,14 +243,38 @@ function FieldView({ rows, googleFields }: { rows: PreviewRow[]; googleFields: s
 // ── Main component ─────────────────────────────────────────────────────────
 
 export function PreviewClient({
+  feedId,
   feedName,
-  data,
+  data: initialData,
 }: {
   feedId: string
   feedName: string
   data: PreviewData
 }) {
   const [tab, setTab] = useState<'product' | 'field'>('product')
+  // LAG 1 ships ~20 rows from the server. After mount we upgrade to a fuller
+  // 100-row sample so the user can inspect more products and the topbar count
+  // reflects an accurate total. `upgrading` drives a subtle dim until the
+  // fuller dataset arrives.
+  const [data, setData] = useState<PreviewData>(initialData)
+  const [upgrading, setUpgrading] = useState(true)
+
+  useEffect(() => {
+    let cancelled = false
+    fetch(`/api/preview?feedId=${encodeURIComponent(feedId)}&limit=100`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((full: PreviewData | null) => {
+        if (cancelled || !full) return
+        setData(full)
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (!cancelled) setUpgrading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [feedId])
 
   return (
     <div className="min-h-screen">
@@ -290,7 +314,10 @@ export function PreviewClient({
         </div>
       </header>
 
-      <main className="px-4 py-4">
+      <main
+        className="px-4 py-4"
+        style={{ opacity: upgrading ? 0.85 : 1, transition: 'opacity 150ms ease' }}
+      >
         {data.rows.length === 0 ? (
           <div
             className="ff-panel py-12 text-center"

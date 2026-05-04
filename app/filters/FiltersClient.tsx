@@ -221,9 +221,9 @@ function RuleRow({
       )}
 
       <button
+        type="button"
         onClick={onDelete}
-        className="shrink-0 w-6 h-6 flex items-center justify-center transition-colors"
-        style={{ borderRadius: '4px', color: 'var(--color-text-tertiary)' }}
+        className="ff-btn-ghost shrink-0 w-6 h-6"
         aria-label="Delete rule"
       >
         <XIcon />

@@ -26,7 +26,7 @@ function ProductRow({ product }: { product: ShopifyProduct }) {
     <div className="ff-panel">
       <button
         onClick={() => setOpen((v) => !v)}
-        className="w-full flex items-center gap-3 px-3.5 py-2 text-left transition-colors"
+        className="ff-table-row w-full flex items-center gap-3 px-3.5 py-2 text-left cursor-pointer"
         style={{ background: open ? 'var(--color-background-secondary)' : 'transparent' }}
       >
         {product.images[0]?.src ? (
@@ -294,13 +294,15 @@ function PaginationBar({
 }: {
   page: number
   pageSize: number
-  totalPages: number
+  // null = total still loading (LAG 2). Pagination labels and Next button
+  // fall back to optimistic behaviour while we wait for the count.
+  totalPages: number | null
   onPageChange: (p: number) => void
   onPageSizeChange: (n: number) => void
   disabled: boolean
 }) {
   const canPrev = page > 1 && !disabled
-  const canNext = page < totalPages && !disabled
+  const canNext = !disabled && (totalPages == null || page < totalPages)
 
   return (
     <div
@@ -348,7 +350,8 @@ function PaginationBar({
       </div>
 
       <span style={{ fontSize: '11px', color: 'var(--color-text-tertiary)' }}>
-        Page {page} of {totalPages}
+        Page {page}
+        {totalPages != null ? ` of ${totalPages}` : ''}
       </span>
     </div>
   )
@@ -360,8 +363,7 @@ export function ProductsTable({
   page,
   pageSize,
   totalPages,
-  search,
-  onSearchChange,
+  hasActiveFilter,
   onPageChange,
   onPageSizeChange,
   loading,
@@ -370,23 +372,14 @@ export function ProductsTable({
   total: number
   page: number
   pageSize: number
-  totalPages: number
-  search: string
-  onSearchChange: (s: string) => void
+  totalPages: number | null
+  hasActiveFilter: boolean
   onPageChange: (p: number) => void
   onPageSizeChange: (n: number) => void
   loading: boolean
 }) {
   return (
     <div>
-      <input
-        type="search"
-        placeholder="Search title, vendor, handle, tags…"
-        value={search}
-        onChange={(e) => onSearchChange(e.target.value)}
-        className="ff-input mb-3"
-      />
-
       <div
         className="space-y-1.5"
         style={{ opacity: loading ? 0.6 : 1, transition: 'opacity 0.15s ease' }}
@@ -401,13 +394,13 @@ export function ProductsTable({
           className="ff-panel py-12 text-center"
           style={{ fontSize: '12px', color: 'var(--color-text-tertiary)' }}
         >
-          {search
-            ? 'No products match your search.'
+          {hasActiveFilter
+            ? 'No products match your filters.'
             : 'No products on this page.'}
         </div>
       )}
 
-      {total > 0 && (
+      {(total > 0 || products.length > 0) && (
         <PaginationBar
           page={page}
           pageSize={pageSize}

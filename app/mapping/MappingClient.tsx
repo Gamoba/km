@@ -674,7 +674,7 @@ function CombineChip({
       onDragOver={onDragOver}
       onDrop={onDrop}
       onDragEnd={onDragEnd}
-      className="inline-flex items-center gap-1.5"
+      className={`inline-flex items-center gap-1.5 ${isDragging ? 'cursor-grabbing' : 'cursor-grab'}`}
       style={{
         position: 'relative',
         padding: '4px 4px 4px 8px',
@@ -687,7 +687,6 @@ function CombineChip({
           : 'var(--color-text-secondary)',
         borderRadius: '4px',
         opacity: isDragging ? 0.4 : 1,
-        cursor: 'grab',
         transition: 'opacity 0.12s ease',
         userSelect: 'none',
       }}
@@ -709,27 +708,13 @@ function CombineChip({
       </span>
       <button
         type="button"
+        className="ff-chip-close"
         onMouseDown={(e) => e.stopPropagation()}
         onClick={(e) => {
           e.stopPropagation()
           onRemove()
         }}
         aria-label="Remove block"
-        style={{
-          width: '16px',
-          height: '16px',
-          display: 'inline-flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          background: 'transparent',
-          border: 'none',
-          color: 'inherit',
-          opacity: 0.65,
-          cursor: 'pointer',
-          fontSize: '13px',
-          lineHeight: 1,
-          padding: 0,
-        }}
       >
         ×
       </button>
@@ -3131,14 +3116,35 @@ export default function MappingClient({
   feedName,
   feedMode,
   initialMappings,
-  metafields,
 }: {
   feedId: string
   feedName: string
   feedMode: 'product' | 'variant'
   initialMappings: InitialMapping[]
-  metafields: { namespace: string; key: string }[]
 }) {
+  // Metafields load progressively (LAG 2). Field-selector dropdowns render
+  // with standard Shopify fields immediately and gain metafield options once
+  // the paginated scan returns. Saved mappings that reference metafields are
+  // unaffected — they round-trip through their stored "metafield:..." keys.
+  const [metafields, setMetafields] = useState<
+    { namespace: string; key: string }[]
+  >([])
+  useEffect(() => {
+    let cancelled = false
+    fetch(`/api/mapping/metafields?feedId=${encodeURIComponent(feedId)}`)
+      .then((r) => r.json())
+      .then((data: { metafields?: { namespace: string; key: string }[] }) => {
+        if (cancelled) return
+        setMetafields(data.metafields ?? [])
+      })
+      .catch(() => {
+        // Non-fatal — the dropdown stays standard-fields-only.
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [feedId])
+
   const [mappings, setMappings] = useState<Record<string, FieldState>>(() => {
     const init: Record<string, FieldState> = {}
     for (const f of ALL_FIELDS) init[f] = { type: '', config: {} }

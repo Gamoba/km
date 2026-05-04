@@ -48,3 +48,46 @@ export const borders = {
   panel: '1px solid var(--color-border-tertiary)',
   subtle: '0.5px solid var(--color-border-tertiary)',
 } as const
+
+// ── Interactive states ────────────────────────────────────────────────────
+// Reusable Tailwind class fragments for cursors, transitions, focus rings and
+// disabled treatments. Prefer these over hard-coding equivalent classes so we
+// can tune them centrally.
+export const interactive = {
+  cursor: {
+    pointer: 'cursor-pointer',
+    notAllowed: 'cursor-not-allowed',
+    grab: 'cursor-grab',
+    grabbing: 'cursor-grabbing',
+    wait: 'cursor-wait',
+    text: 'cursor-text',
+  },
+  transition: {
+    colors: 'transition-colors duration-150',
+    all: 'transition-all duration-150',
+    opacity: 'transition-opacity duration-150',
+  },
+  focus: {
+    ring: 'focus:outline-none focus:ring-2 focus:ring-[#6c5ce7] focus:ring-offset-1',
+  },
+  disabled: {
+    base: 'disabled:opacity-50 disabled:cursor-not-allowed',
+  },
+} as const
+
+// Hover treatments grouped by component family. Most call sites should use the
+// matching ff-* CSS class instead (ff-btn-primary, ff-card, ff-table-row,
+// ff-nav-item, ff-chip-close) — these tokens cover the few inline spots where
+// adding a class isn't practical.
+export const hover = {
+  button: {
+    primary: 'hover:bg-[#5a4bd1] active:bg-[#4a3bc1]',
+    secondary: 'hover:bg-[var(--color-background-secondary)]',
+    danger: 'hover:bg-red-50',
+    ghost: 'hover:bg-[var(--color-background-secondary)]',
+  },
+  row: 'hover:bg-[var(--color-background-secondary)]',
+  card: 'hover:shadow-md hover:-translate-y-0.5 transition-all duration-150',
+  navItem: 'hover:bg-[rgba(108,92,231,0.1)] hover:text-white',
+  chip: 'hover:opacity-80',
+} as const

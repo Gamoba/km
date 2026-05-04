@@ -17,8 +17,9 @@ type FeedSummary = {
   lastSynced: string | null
   feedGenerated: string | null
   feedProductCount: number | null
-  includedCount: number
-  excludedCount: number
+  // null while LAG 2 (per-feed countFilteredProducts) is still in flight.
+  includedCount: number | null
+  excludedCount: number | null
   validationStatus: ValidationStatus
   validationErrors: ValidationIssue[] | null
 }
@@ -33,6 +34,8 @@ export function FeedListClient() {
   async function load() {
     setError(null)
     try {
+      // LAG 1 — feed list with cache, mappings, last-sync. The slow per-feed
+      // included/excluded counts arrive separately so the cards render fast.
       const res = await fetch('/api/feeds')
       const data = (await res.json()) as { feeds?: FeedSummary[]; error?: string }
       if (data.error) throw new Error(data.error)
@@ -42,8 +45,35 @@ export function FeedListClient() {
     }
   }
 
+  // LAG 2 — per-feed filtered counts. Keeps the dashboard responsive when a
+  // store has many feeds; countFilteredProducts pages through products + applies
+  // filters in JS, so it's an O(N feeds × M products) overall workload.
+  async function loadCounts() {
+    try {
+      const res = await fetch('/api/feeds/counts')
+      const data = (await res.json()) as {
+        counts?: { feedId: string; included: number; excluded: number }[]
+      }
+      const byId = new Map(
+        (data.counts ?? []).map((c) => [c.feedId, c] as const)
+      )
+      setFeeds((prev) =>
+        prev
+          ? prev.map((f) => {
+              const c = byId.get(f.id)
+              if (!c) return f
+              return { ...f, includedCount: c.included, excludedCount: c.excluded }
+            })
+          : prev
+      )
+    } catch {
+      // Counts are non-fatal — leave them as null and the cards show "—".
+    }
+  }
+
   useEffect(() => {
     load()
+    loadCounts()
   }, [])
 
   function handlePatched(updated: PatchedFeed) {
@@ -136,7 +166,7 @@ function FeedCard({
   const [openModal, setOpenModal] = useState<'rename' | 'description' | 'delete' | null>(null)
 
   return (
-    <div className="ff-panel">
+    <div className="ff-panel ff-card">
       <div
         className="ff-panel-header"
         style={{ textTransform: 'none', letterSpacing: 0, fontSize: '12px', alignItems: 'flex-start' }}
@@ -172,8 +202,8 @@ function FeedCard({
 
       <div className="px-3.5 py-3 space-y-2">
         <Stat label="Products" value={String(feed.productCount)} />
-        <Stat label="Included products" value={String(feed.includedCount)} />
-        <Stat label="Excluded products" value={String(feed.excludedCount)} />
+        <Stat label="Included products" value={feed.includedCount != null ? String(feed.includedCount) : '—'} />
+        <Stat label="Excluded products" value={feed.excludedCount != null ? String(feed.excludedCount) : '—'} />
         <Stat
           label="Products synced"
           value={

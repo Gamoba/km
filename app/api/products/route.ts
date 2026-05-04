@@ -41,6 +41,12 @@ export async function GET(req: Request) {
   const searchRaw = (url.searchParams.get('search') ?? '').trim()
   const search = searchRaw.replace(/[,()*]/g, '')
 
+  // skipCount=1 omits the count: 'exact' header so PostgREST returns rows
+  // without scanning the whole filtered set for an exact total. Used by the
+  // products page LAG 1 fetch — total/totalPages come from /api/products/meta
+  // instead. When skipCount is on, the response carries total: null.
+  const skipCount = url.searchParams.get('skipCount') === '1'
+
   // Discrete filter params used by the field-preview sidebar. Each one is
   // optional; missing or empty params are no-ops. All filters AND together.
   const fVendor = (url.searchParams.get('vendor') ?? '').trim()
@@ -61,7 +67,10 @@ export async function GET(req: Request) {
 
     let query = db
       .from('products')
-      .select('*, metafields:product_metafields(*)', { count: 'exact' })
+      .select(
+        '*, metafields:product_metafields(*)',
+        skipCount ? undefined : { count: 'exact' }
+      )
       .eq('feed_id', feedId)
       .order('created_at', { ascending: true })
       .range(from, to)
@@ -113,8 +122,8 @@ export async function GET(req: Request) {
     if (error) throw new Error(error.message)
 
     const products = toShopifyData((data ?? []) as SupabaseProduct[]).products
-    const total = count ?? 0
-    const totalPages = Math.max(1, Math.ceil(total / pageSize))
+    const total = skipCount ? null : (count ?? 0)
+    const totalPages = total === null ? null : Math.max(1, Math.ceil(total / pageSize))
 
     return Response.json({
       products,

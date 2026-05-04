@@ -1,7 +1,6 @@
 import { NextResponse } from 'next/server'
 import { createSupabaseServerClient } from '@/lib/supabase-server'
 import { adminDb } from '@/lib/feeds'
-import { countFilteredProducts } from '@/lib/feedGenerator'
 import type { ValidationIssue } from '@/lib/feedValidator'
 
 export async function GET() {
@@ -33,17 +32,19 @@ export async function GET() {
     validation_errors: ValidationIssue[] | null
   }
 
-  // Per-feed counts use head:true so PostgREST returns just a count header — no
-  // rows transferred, no 1000-row cap to bump into. Last-sync uses a per-feed
-  // ORDER BY ... LIMIT 1 for the same reason: a single .in() query across feeds
-  // would have its row set truncated and silently lose the newest feed's data.
+  // LAG 1 — fast per-feed lookups: head:true count (products), single-row
+  // cache + last-sync. The slow per-feed countFilteredProducts call moved
+  // to /api/feeds/counts so it doesn't hold back the dashboard render.
+  // Per-feed product count uses head:true so PostgREST returns just a count
+  // header. Last-sync uses ORDER BY synced_at LIMIT 1 per feed for the same
+  // reason: a single .in() query across feeds would hit the 1000-row cap
+  // and silently drop the newest feed.
   const productCount = new Map<string, number>()
   const lastSyncByFeed = new Map<string, string>()
   let caches: CacheRow[] | null = []
-  let filterCounts: (readonly [string, { total: number; included: number }])[] = []
 
   try {
-    const [productCountResults, cacheResult, lastSyncResults, filterResults] = await Promise.all([
+    const [productCountResults, cacheResult, lastSyncResults] = await Promise.all([
       Promise.allSettled(
         feedIds.map(
           async (id) =>
@@ -78,12 +79,6 @@ export async function GET() {
             ] as const
         )
       ),
-      // countFilteredProducts can throw for a single feed (DB error, etc.).
-      // Use allSettled so one bad feed doesn't blow up the whole dashboard;
-      // the failed feed just falls back to {0,0} included/excluded counts.
-      Promise.allSettled(
-        feedIds.map(async (id) => [id, await countFilteredProducts(id)] as const)
-      ),
     ])
 
     for (const r of productCountResults) {
@@ -106,13 +101,6 @@ export async function GET() {
     }
 
     caches = (cacheResult.data as CacheRow[] | null) ?? []
-    filterCounts = filterResults
-      .map((r) => {
-        if (r.status === 'fulfilled') return r.value
-        console.error('[/api/feeds] countFilteredProducts failed for one feed:', r.reason)
-        return null
-      })
-      .filter((x): x is readonly [string, { total: number; included: number }] => x !== null)
   } catch (err) {
     console.error('[/api/feeds] dashboard data fetch failed:', err)
     return NextResponse.json(
@@ -126,11 +114,8 @@ export async function GET() {
     cacheByFeed.set(row.feed_id, row)
   }
 
-  const filterCountByFeed = new Map(filterCounts)
-
   const enriched = (feeds ?? []).map((f) => {
     const cache = cacheByFeed.get(f.id)
-    const counts = filterCountByFeed.get(f.id) ?? { total: 0, included: 0 }
     return {
       id: f.id,
       name: f.name,
@@ -141,8 +126,10 @@ export async function GET() {
       lastSynced: lastSyncByFeed.get(f.id) ?? null,
       feedGenerated: cache?.generated_at ?? null,
       feedProductCount: cache?.product_count ?? null,
-      includedCount: counts.included,
-      excludedCount: Math.max(0, counts.total - counts.included),
+      // null = LAG 2 still loading; FeedListClient fills these from
+      // /api/feeds/counts.
+      includedCount: null,
+      excludedCount: null,
       validationStatus: cache?.validation_status ?? null,
       validationErrors: cache?.validation_errors ?? null,
     }
