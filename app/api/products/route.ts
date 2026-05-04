@@ -21,10 +21,10 @@ export async function GET(req: Request) {
 
   const url = new URL(req.url)
   const feedId = url.searchParams.get('feedId')
-  if (!feedId) return Response.json({ error: 'feedId mangler' }, { status: 400 })
+  if (!feedId) return Response.json({ error: 'feedId is missing' }, { status: 400 })
 
   const owned = await getOwnedFeed(user.id, feedId)
-  if (!owned) return Response.json({ error: 'Feed ikke fundet' }, { status: 404 })
+  if (!owned) return Response.json({ error: 'Feed not found' }, { status: 404 })
 
   // Pagination params — clamp to safe values so the URL can't request 100k/page.
   const pageRaw = parseInt(url.searchParams.get('page') ?? '1', 10)
@@ -125,7 +125,7 @@ export async function GET(req: Request) {
     })
   } catch (err) {
     return Response.json(
-      { error: err instanceof Error ? err.message : 'Ukendt fejl' },
+      { error: err instanceof Error ? err.message : 'Unknown error' },
       { status: 500 }
     )
   }

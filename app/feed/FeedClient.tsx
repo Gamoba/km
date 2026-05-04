@@ -80,7 +80,7 @@ export function FeedClient({
         })
       }
     } catch (err) {
-      setGenerateError(err instanceof Error ? err.message : 'Ukendt fejl')
+      setGenerateError(err instanceof Error ? err.message : 'Unknown error')
     } finally {
       setIsGenerating(false)
     }
@@ -110,7 +110,7 @@ export function FeedClient({
         <div className="flex items-center gap-3">
           <h1 className="ff-topbar-title">{feedName}</h1>
           <span style={{ fontSize: '11px', color: 'var(--color-text-tertiary)' }}>
-            Administrer dit Google Shopping feed
+            Manage your Google Shopping feed
           </span>
         </div>
       </header>
@@ -232,9 +232,9 @@ function StatusOverview({
 
       <div className="mt-4">
         <div className="flex items-center justify-between mb-1.5">
-          <span className="ff-label">Mapping fremdrift</span>
+          <span className="ff-label">Mapping progress</span>
           <span style={{ fontSize: '11px', color: 'var(--color-text-secondary)' }}>
-            {mappingCount} af {totalFields} felter mappet
+            {mappingCount} of {totalFields} fields mapped
           </span>
         </div>
         <div
@@ -271,8 +271,8 @@ const STATUS_META: Record<
   }
 > = {
   ready: {
-    label: 'Feed klar',
-    subtitle: 'Klar til Google Merchant Center',
+    label: 'Feed ready',
+    subtitle: 'Ready for Google Merchant Center',
     iconBg: 'var(--color-badge-success-bg)',
     iconColor: 'var(--color-badge-success-text)',
     titleColor: 'var(--color-badge-success-text)',
@@ -283,8 +283,8 @@ const STATUS_META: Record<
     ),
   },
   warnings: {
-    label: 'Advarsler',
-    subtitle: 'Feedet virker men kan forbedres',
+    label: 'Warnings',
+    subtitle: 'Feed works but can be improved',
     iconBg: 'var(--color-badge-warning-bg)',
     iconColor: 'var(--color-badge-warning-text)',
     titleColor: 'var(--color-badge-warning-text)',
@@ -295,8 +295,8 @@ const STATUS_META: Record<
     ),
   },
   errors: {
-    label: 'Fejl',
-    subtitle: 'Feedet vil blive afvist af Google — fix før upload',
+    label: 'Errors',
+    subtitle: 'Feed will be rejected by Google — fix before uploading',
     iconBg: 'var(--color-badge-danger-bg)',
     iconColor: 'var(--color-badge-danger-text)',
     titleColor: 'var(--color-badge-danger-text)',
@@ -307,8 +307,8 @@ const STATUS_META: Record<
     ),
   },
   'not-generated': {
-    label: 'Ikke genereret endnu',
-    subtitle: 'Generer feedet for at se dets status',
+    label: 'Not generated yet',
+    subtitle: 'Generate the feed to see its status',
     iconBg: 'var(--color-background-secondary)',
     iconColor: 'var(--color-text-tertiary)',
     titleColor: 'var(--color-text-primary)',
@@ -338,13 +338,13 @@ function StatisticsSection({
 }) {
   return (
     <div className="ff-panel">
-      <div className="ff-panel-header">Statistik</div>
+      <div className="ff-panel-header">Statistics</div>
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 p-3.5">
-        <StatCard label="Produkter i feedet" value={feedItemCount != null ? String(feedItemCount) : '—'} />
-        <StatCard label="Inkluderede produkter" value={String(includedCount)} />
-        <StatCard label="Ekskluderede produkter" value={String(excludedCount)} />
-        <StatCard label="Senest synkroniseret" value={formatDateTime(lastSynced)} />
-        <StatCard label="Senest genereret" value={formatDateTime(lastGenerated)} />
+        <StatCard label="Items in feed" value={feedItemCount != null ? String(feedItemCount) : '—'} />
+        <StatCard label="Included products" value={String(includedCount)} />
+        <StatCard label="Excluded products" value={String(excludedCount)} />
+        <StatCard label="Last synced" value={formatDateTime(lastSynced)} />
+        <StatCard label="Last generated" value={formatDateTime(lastGenerated)} />
       </div>
     </div>
   )
@@ -374,7 +374,7 @@ function StatCard({ label, value }: { label: string; value: string }) {
 function formatDateTime(iso: string | null): string {
   if (!iso) return '—'
   try {
-    return new Date(iso).toLocaleString('da-DK', {
+    return new Date(iso).toLocaleString('en-US', {
       day: '2-digit',
       month: '2-digit',
       year: 'numeric',
@@ -399,16 +399,16 @@ function NextSteps({
 }) {
   return (
     <div className="ff-panel">
-      <div className="ff-panel-header">Næste skridt</div>
+      <div className="ff-panel-header">Next steps</div>
       <div className="p-3.5 space-y-2">
         <NextStepRow n={1}>
           <Link href={`/feed/${feedId}/mapping`} className="ff-btn-secondary">
-            Opsæt mapping
+            Set up mapping
           </Link>
         </NextStepRow>
         <NextStepRow n={2}>
           <Link href={`/feed/${feedId}/filters`} className="ff-btn-secondary">
-            Konfigurer filtre
+            Configure filters
           </Link>
         </NextStepRow>
         <NextStepRow n={3}>
@@ -418,7 +418,7 @@ function NextSteps({
             disabled={isGenerating}
             className="ff-btn-primary"
           >
-            {isGenerating ? 'Genererer…' : 'Generer feed'}
+            {isGenerating ? 'Generating…' : 'Generate feed'}
           </button>
         </NextStepRow>
       </div>
@@ -427,7 +427,7 @@ function NextSteps({
 }
 
 function NextStepRow({ n, children }: { n: number; children: React.ReactNode }) {
-  const labels = ['Opsæt mapping', 'Konfigurer filtre', 'Generer feed']
+  const labels = ['Set up mapping', 'Configure filters', 'Generate feed']
   return (
     <div className="flex items-center gap-3">
       <div
@@ -448,7 +448,7 @@ function NextStepRow({ n, children }: { n: number; children: React.ReactNode }) 
         className="flex-1"
         style={{ fontSize: '12px', color: 'var(--color-text-primary)' }}
       >
-        Trin {n}: {labels[n - 1]}
+        Step {n}: {labels[n - 1]}
       </span>
       {children}
     </div>
@@ -476,24 +476,24 @@ function ValidationMini({
   const remaining = (errors.length + warnings.length) - issuesPreview.length
 
   let badgeClass = 'ff-badge ff-badge-neutral'
-  let badgeLabel = 'Ikke kørt'
+  let badgeLabel = 'Not run'
   if (result) {
     if (result.status === 'errors') {
       badgeClass = 'ff-badge ff-badge-danger'
-      badgeLabel = `${errors.length} fejl${warnings.length > 0 ? ` · ${warnings.length} advarsel${warnings.length === 1 ? '' : 'er'}` : ''}`
+      badgeLabel = `${errors.length} ${errors.length === 1 ? 'error' : 'errors'}${warnings.length > 0 ? ` · ${warnings.length} ${warnings.length === 1 ? 'warning' : 'warnings'}` : ''}`
     } else if (result.status === 'warnings') {
       badgeClass = 'ff-badge ff-badge-warning'
-      badgeLabel = `${warnings.length} advarsel${warnings.length === 1 ? '' : 'er'}`
+      badgeLabel = `${warnings.length} ${warnings.length === 1 ? 'warning' : 'warnings'}`
     } else {
       badgeClass = 'ff-badge ff-badge-success'
-      badgeLabel = 'Ingen problemer'
+      badgeLabel = 'No issues'
     }
   }
 
   return (
     <div className="ff-panel">
       <div className="ff-panel-header">
-        <span>Validering</span>
+        <span>Validation</span>
         <span className={badgeClass}>{badgeLabel}</span>
       </div>
       <div className="p-3.5 space-y-2.5">
@@ -503,13 +503,13 @@ function ValidationMini({
 
         {!result && (
           <p style={{ fontSize: '11px', color: 'var(--color-text-tertiary)' }}>
-            Ingen validering kørt endnu — klik &quot;Kør validering&quot; for at tjekke feedet.
+            No validation run yet — click &quot;Run validation&quot; to check the feed.
           </p>
         )}
 
         {result && issuesPreview.length === 0 && result.status === 'ok' && (
           <p style={{ fontSize: '11px', color: 'var(--color-text-tertiary)' }}>
-            Feedet opfylder Googles krav.
+            Feed meets Google&apos;s requirements.
           </p>
         )}
 
@@ -520,7 +520,7 @@ function ValidationMini({
                 <span
                   className={`ff-badge ${issue.type === 'error' ? 'ff-badge-danger' : 'ff-badge-warning'} shrink-0`}
                 >
-                  {issue.type === 'error' ? 'Fejl' : 'Advarsel'}
+                  {issue.type === 'error' ? 'Error' : 'Warning'}
                 </span>
                 <code
                   className="ff-mono shrink-0"
@@ -540,7 +540,7 @@ function ValidationMini({
               <li
                 style={{ fontSize: '11px', color: 'var(--color-text-tertiary)', paddingLeft: '4px' }}
               >
-                +{remaining} flere…
+                +{remaining} more…
               </li>
             )}
           </ul>
@@ -553,7 +553,7 @@ function ValidationMini({
             disabled={isRunning}
             className="ff-btn-primary"
           >
-            {isRunning ? 'Validerer…' : 'Kør validering'}
+            {isRunning ? 'Validating…' : 'Run validation'}
           </button>
           {result && (
             <button
@@ -561,7 +561,7 @@ function ValidationMini({
               onClick={onShowDetails}
               className="ff-btn-secondary"
             >
-              Se alle detaljer
+              See all details
             </button>
           )}
         </div>
@@ -674,8 +674,8 @@ function SyncStatusBanner({ feedId }: { feedId: string }) {
   if (phase === 'syncing') {
     return (
       <PendingBanner
-        title="Synkroniserer produkter fra Shopify…"
-        subtitle="Du kan godt navigere væk — synkroniseringen kører videre i baggrunden."
+        title="Syncing products from Shopify…"
+        subtitle="You can navigate away — the sync continues in the background."
       />
     )
   }
@@ -683,7 +683,7 @@ function SyncStatusBanner({ feedId }: { feedId: string }) {
   if (phase === 'sync-done') {
     return (
       <SuccessBanner
-        text={`Synkronisering færdig — ${syncedCount} produkt${syncedCount === 1 ? '' : 'er'} hentet`}
+        text={`Sync complete — ${syncedCount} ${syncedCount === 1 ? 'product' : 'products'} fetched`}
       />
     )
   }
@@ -691,8 +691,8 @@ function SyncStatusBanner({ feedId }: { feedId: string }) {
   if (phase === 'generating') {
     return (
       <PendingBanner
-        title="Genererer feed…"
-        subtitle="Bygger XML ud fra de synkroniserede produkter."
+        title="Generating feed…"
+        subtitle="Building XML from the synced products."
       />
     )
   }
@@ -700,7 +700,7 @@ function SyncStatusBanner({ feedId }: { feedId: string }) {
   if (phase === 'ready') {
     const count = feedItemCount ?? syncedCount ?? 0
     return (
-      <SuccessBanner text={`Feed klar — ${count} produkt${count === 1 ? '' : 'er'}`} />
+      <SuccessBanner text={`Feed ready — ${count} ${count === 1 ? 'product' : 'products'}`} />
     )
   }
 

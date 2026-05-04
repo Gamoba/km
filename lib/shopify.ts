@@ -28,7 +28,7 @@ async function restGet(url: string): Promise<{ json: Record<string, unknown>; li
         await sleep(waitSec * 1000)
         continue
       }
-      throw new Error('Shopify rate limit: for mange forsøg')
+      throw new Error('Shopify rate limit: too many attempts')
     }
 
     if (!res.ok) {
@@ -85,7 +85,7 @@ async function shopifyGraphQL<T>(
         await sleep((isNaN(retryAfter) ? 2 : retryAfter) * 1000)
         continue
       }
-      throw new Error('Shopify GraphQL rate limit: for mange forsøg')
+      throw new Error('Shopify GraphQL rate limit: too many attempts')
     }
 
     if (!res.ok) throw new Error(`Shopify GraphQL ${res.status}`)

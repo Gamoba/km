@@ -20,10 +20,10 @@ export async function GET(req: Request) {
 
   const url = new URL(req.url)
   const feedId = url.searchParams.get('feedId')
-  if (!feedId) return NextResponse.json({ error: 'feedId mangler' }, { status: 400 })
+  if (!feedId) return NextResponse.json({ error: 'feedId is missing' }, { status: 400 })
 
   const owned = await getOwnedFeed(user.id, feedId)
-  if (!owned) return NextResponse.json({ error: 'Feed ikke fundet' }, { status: 404 })
+  if (!owned) return NextResponse.json({ error: 'Feed not found' }, { status: 404 })
 
   const db = adminDb()
   const { data } = await db
@@ -43,10 +43,10 @@ export async function POST(req: Request) {
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const body = (await req.json()) as ShopSettingsBody
-  if (!body.feed_id) return NextResponse.json({ error: 'feed_id mangler' }, { status: 400 })
+  if (!body.feed_id) return NextResponse.json({ error: 'feed_id is missing' }, { status: 400 })
 
   const owned = await getOwnedFeed(user.id, body.feed_id)
-  if (!owned) return NextResponse.json({ error: 'Feed ikke fundet' }, { status: 404 })
+  if (!owned) return NextResponse.json({ error: 'Feed not found' }, { status: 404 })
 
   const db = adminDb()
   const { error } = await db.from('shop_settings').upsert(

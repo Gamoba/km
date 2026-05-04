@@ -38,6 +38,6 @@ export async function runFeedValidation(
 
     return result
   } catch (err) {
-    return { error: err instanceof Error ? err.message : 'Ukendt fejl under validering' }
+    return { error: err instanceof Error ? err.message : 'Unknown error during validation' }
   }
 }

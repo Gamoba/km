@@ -38,7 +38,7 @@ export function FeedListClient() {
       if (data.error) throw new Error(data.error)
       setFeeds(data.feeds ?? [])
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Ukendt fejl')
+      setError(err instanceof Error ? err.message : 'Unknown error')
     }
   }
 
@@ -72,7 +72,7 @@ export function FeedListClient() {
           )}
         </div>
         <button onClick={() => setShowCreate(true)} className="ff-btn-primary">
-          Opret nyt feed
+          Create new feed
         </button>
       </header>
 
@@ -94,15 +94,15 @@ export function FeedListClient() {
             className="ff-panel py-16 text-center"
             style={{ fontSize: '12px', color: 'var(--color-text-tertiary)' }}
           >
-            Henter feeds…
+            Loading feeds…
           </div>
         ) : feeds.length === 0 ? (
           <div className="ff-panel py-16 flex flex-col items-center gap-3">
             <p style={{ fontSize: '12px', color: 'var(--color-text-tertiary)' }}>
-              Ingen feeds endnu
+              No feeds yet
             </p>
             <button onClick={() => setShowCreate(true)} className="ff-btn-primary">
-              Opret dit første feed
+              Create your first feed
             </button>
           </div>
         ) : (
@@ -171,14 +171,14 @@ function FeedCard({
       </div>
 
       <div className="px-3.5 py-3 space-y-2">
-        <Stat label="Produkter" value={String(feed.productCount)} />
-        <Stat label="Inkluderede produkter" value={String(feed.includedCount)} />
-        <Stat label="Ekskluderede produkter" value={String(feed.excludedCount)} />
+        <Stat label="Products" value={String(feed.productCount)} />
+        <Stat label="Included products" value={String(feed.includedCount)} />
+        <Stat label="Excluded products" value={String(feed.excludedCount)} />
         <Stat
-          label="Produkter synkroniseret"
+          label="Products synced"
           value={
             feed.lastSynced
-              ? new Date(feed.lastSynced).toLocaleString('da-DK', {
+              ? new Date(feed.lastSynced).toLocaleString('en-US', {
                   day: '2-digit',
                   month: '2-digit',
                   year: 'numeric',
@@ -189,10 +189,10 @@ function FeedCard({
           }
         />
         <Stat
-          label="Feed opdateret"
+          label="Feed updated"
           value={
             feed.feedGenerated
-              ? `${new Date(feed.feedGenerated).toLocaleDateString('da-DK')} · ${feed.feedProductCount ?? 0} stk.`
+              ? `${new Date(feed.feedGenerated).toLocaleDateString('en-US')} · ${feed.feedProductCount ?? 0} items`
               : '—'
           }
         />
@@ -247,20 +247,20 @@ function StatusBadge({ feed }: { feed: FeedSummary }) {
   const warningCount = issues.filter((i) => i.type === 'warning').length
 
   let className = 'ff-badge ff-badge-success'
-  let label = 'Klar'
+  let label = 'Ready'
 
   if (!feed.feedGenerated) {
     className = 'ff-badge ff-badge-neutral'
-    label = 'Ikke genereret'
+    label = 'Not generated'
   } else if (feed.validationStatus === 'errors') {
     className = 'ff-badge ff-badge-danger'
-    label = errorCount > 0 ? `${errorCount} fejl` : 'Fejl'
+    label = errorCount > 0 ? `${errorCount} ${errorCount === 1 ? 'error' : 'errors'}` : 'Errors'
   } else if (feed.validationStatus === 'warnings') {
     className = 'ff-badge ff-badge-warning'
     label =
       warningCount > 0
-        ? `${warningCount} ${warningCount === 1 ? 'advarsel' : 'advarsler'}`
-        : 'Advarsler'
+        ? `${warningCount} ${warningCount === 1 ? 'warning' : 'warnings'}`
+        : 'Warnings'
   }
 
   return (
@@ -268,7 +268,7 @@ function StatusBadge({ feed }: { feed: FeedSummary }) {
       href={`/feed/${feed.id}`}
       className={className}
       style={{ textDecoration: 'none', cursor: 'pointer' }}
-      title="Se valideringsdetaljer"
+      title="View validation details"
     >
       {label}
     </Link>
@@ -310,8 +310,8 @@ function CardMenu({
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
-        title="Indstillinger"
-        aria-label="Indstillinger"
+        title="Settings"
+        aria-label="Settings"
         aria-haspopup="menu"
         aria-expanded={open}
         className="shrink-0"
@@ -358,13 +358,13 @@ function CardMenu({
             boxShadow: '0 4px 12px rgba(0,0,0,0.08)',
           }}
         >
-          <MenuItem onClick={() => { setOpen(false); onRename() }}>Omdøb feed</MenuItem>
-          <MenuItem onClick={() => { setOpen(false); onEditDescription() }}>Rediger beskrivelse</MenuItem>
+          <MenuItem onClick={() => { setOpen(false); onRename() }}>Rename feed</MenuItem>
+          <MenuItem onClick={() => { setOpen(false); onEditDescription() }}>Edit description</MenuItem>
           <MenuItem
             onClick={() => { setOpen(false); onDelete() }}
             danger
           >
-            Slet feed
+            Delete feed
           </MenuItem>
         </div>
       )}
@@ -430,8 +430,8 @@ function CopyLinkButton({ feedId }: { feedId: string }) {
     <button
       type="button"
       onClick={copy}
-      title="Kopiér feed URL"
-      aria-label="Kopiér feed URL"
+      title="Copy feed URL"
+      aria-label="Copy feed URL"
       className="shrink-0"
       style={{
         display: 'inline-flex',
@@ -535,18 +535,18 @@ function RenameModal({
       const updated = await patchFeed(feed.id, { name: trimmed })
       onSaved(updated)
     } catch (e2) {
-      setErr(e2 instanceof Error ? e2.message : 'Kunne ikke gemme')
+      setErr(e2 instanceof Error ? e2.message : 'Could not save')
     } finally {
       setSubmitting(false)
     }
   }
 
   return (
-    <ModalShell title="Omdøb feed" onClose={onClose}>
+    <ModalShell title="Rename feed" onClose={onClose}>
       <form onSubmit={submit}>
         <div className="p-3.5 space-y-3">
           <div>
-            <label className="ff-label block mb-1.5">Navn</label>
+            <label className="ff-label block mb-1.5">Name</label>
             <input
               type="text"
               value={name}
@@ -565,14 +565,14 @@ function RenameModal({
           style={{ borderTop: '1px solid var(--color-border-tertiary)' }}
         >
           <button type="button" onClick={onClose} className="ff-btn-secondary">
-            Annuller
+            Cancel
           </button>
           <button
             type="submit"
             disabled={submitting || !name.trim() || name.trim() === feed.name}
             className="ff-btn-primary"
           >
-            {submitting ? 'Gemmer…' : 'Gem'}
+            {submitting ? 'Saving…' : 'Save'}
           </button>
         </div>
       </form>
@@ -601,7 +601,7 @@ function EditDescriptionModal({
       const updated = await patchFeed(feed.id, { description })
       onSaved(updated)
     } catch (e2) {
-      setErr(e2 instanceof Error ? e2.message : 'Kunne ikke gemme')
+      setErr(e2 instanceof Error ? e2.message : 'Could not save')
     } finally {
       setSubmitting(false)
     }
@@ -611,15 +611,15 @@ function EditDescriptionModal({
   const dirty = description.trim() !== original.trim()
 
   return (
-    <ModalShell title="Rediger beskrivelse" onClose={onClose}>
+    <ModalShell title="Edit description" onClose={onClose}>
       <form onSubmit={submit}>
         <div className="p-3.5 space-y-3">
           <div>
-            <label className="ff-label block mb-1.5">Beskrivelse</label>
+            <label className="ff-label block mb-1.5">Description</label>
             <textarea
               value={description}
               onChange={(e) => setDescription(e.target.value)}
-              placeholder="Kort beskrivelse"
+              placeholder="Short description"
               rows={3}
               autoFocus
               className="ff-input"
@@ -635,10 +635,10 @@ function EditDescriptionModal({
           style={{ borderTop: '1px solid var(--color-border-tertiary)' }}
         >
           <button type="button" onClick={onClose} className="ff-btn-secondary">
-            Annuller
+            Cancel
           </button>
           <button type="submit" disabled={submitting || !dirty} className="ff-btn-primary">
-            {submitting ? 'Gemmer…' : 'Gem'}
+            {submitting ? 'Saving…' : 'Save'}
           </button>
         </div>
       </form>
@@ -669,16 +669,16 @@ function DeleteFeedModal({
       }
       onDeleted()
     } catch (e2) {
-      setErr(e2 instanceof Error ? e2.message : 'Kunne ikke slette feed')
+      setErr(e2 instanceof Error ? e2.message : 'Could not delete feed')
       setSubmitting(false)
     }
   }
 
   return (
-    <ModalShell title="Slet feed" onClose={onClose}>
+    <ModalShell title="Delete feed" onClose={onClose}>
       <div className="p-3.5 space-y-3">
         <p style={{ fontSize: '12px', color: 'var(--color-text-primary)' }}>
-          Er du sikker på at du vil slette <strong>{feed.name}</strong>? Dette kan ikke fortrydes.
+          Are you sure you want to delete <strong>{feed.name}</strong>? This cannot be undone.
         </p>
         {err && (
           <p style={{ fontSize: '11px', color: 'var(--color-badge-danger-text)' }}>{err}</p>
@@ -689,7 +689,7 @@ function DeleteFeedModal({
         style={{ borderTop: '1px solid var(--color-border-tertiary)' }}
       >
         <button type="button" onClick={onClose} className="ff-btn-secondary" disabled={submitting}>
-          Annuller
+          Cancel
         </button>
         <button
           type="button"
@@ -701,7 +701,7 @@ function DeleteFeedModal({
             borderColor: 'var(--color-badge-danger-text)',
           }}
         >
-          {submitting ? 'Sletter…' : 'Slet feed'}
+          {submitting ? 'Deleting…' : 'Delete feed'}
         </button>
       </div>
     </ModalShell>

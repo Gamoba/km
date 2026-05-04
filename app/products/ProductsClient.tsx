@@ -80,7 +80,7 @@ export function ProductsClient({
         setPhase('ready')
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Ukendt fejl')
+      setError(err instanceof Error ? err.message : 'Unknown error')
       setPhase('error')
     } finally {
       setPaginating(false)
@@ -104,7 +104,7 @@ export function ProductsClient({
       setPage(1)
       await loadFromSupabase({ initial: true })
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Ukendt fejl')
+      setError(err instanceof Error ? err.message : 'Unknown error')
       setPhase('error')
     }
   }
@@ -126,24 +126,24 @@ export function ProductsClient({
     <div className="min-h-screen">
       <header className="ff-topbar">
         <div className="flex items-center gap-3">
-          <h1 className="ff-topbar-title">{feedName} · Produkter</h1>
+          <h1 className="ff-topbar-title">{feedName} · Products</h1>
           {phase === 'ready' && data && (
             <span style={{ fontSize: '11px', color: 'var(--color-text-tertiary)' }}>
-              {data.products.length} af {data.total} produkter
-              {syncResult && ` · synkroniseret på ${(syncResult.durationMs / 1000).toFixed(1)}s`}
+              {data.products.length} of {data.total} products
+              {syncResult && ` · synced in ${(syncResult.durationMs / 1000).toFixed(1)}s`}
             </span>
           )}
           {phase === 'loading' && (
-            <span style={{ fontSize: '11px', color: 'var(--color-text-tertiary)' }}>Henter…</span>
+            <span style={{ fontSize: '11px', color: 'var(--color-text-tertiary)' }}>Loading…</span>
           )}
           {phase === 'syncing' && (
-            <span style={{ fontSize: '11px', color: 'var(--color-text-tertiary)' }}>Synkroniserer…</span>
+            <span style={{ fontSize: '11px', color: 'var(--color-text-tertiary)' }}>Syncing…</span>
           )}
         </div>
         <div className="flex items-center gap-2">
           {(phase === 'ready' || phase === 'empty') && (
             <button onClick={runSync} className="ff-btn-primary">
-              Synkroniser igen
+              Sync again
             </button>
           )}
         </div>
@@ -159,7 +159,7 @@ export function ProductsClient({
             }}
           >
             <p style={{ fontSize: '12px', fontWeight: 500, color: 'var(--color-badge-danger-text)' }}>
-              Fejl
+              Error
             </p>
             <p
               className="mt-1 mb-3"
@@ -168,7 +168,7 @@ export function ProductsClient({
               {error}
             </p>
             <button onClick={() => loadFromSupabase({ initial: true })} className="ff-btn-secondary">
-              Prøv igen
+              Try again
             </button>
           </div>
         )}
@@ -183,7 +183,7 @@ export function ProductsClient({
               }}
             />
             <p style={{ fontSize: '11px', color: 'var(--color-text-tertiary)' }}>
-              {phase === 'syncing' ? 'Henter fra Shopify og gemmer…' : 'Henter produkter…'}
+              {phase === 'syncing' ? 'Fetching from Shopify and saving…' : 'Loading products…'}
             </p>
           </div>
         )}
@@ -191,10 +191,10 @@ export function ProductsClient({
         {phase === 'empty' && (
           <div className="ff-panel py-16 flex flex-col items-center gap-3">
             <p style={{ fontSize: '12px', color: 'var(--color-text-tertiary)' }}>
-              Ingen produkter endnu
+              No products yet
             </p>
             <button onClick={runSync} className="ff-btn-primary">
-              Synkroniser produkter
+              Sync products
             </button>
           </div>
         )}

@@ -20,34 +20,34 @@ type ExistingMapping = {
 // ── Shopify field list ─────────────────────────────────────────────────────
 
 const SHOPIFY_STANDARD_FIELDS = [
-  'item_group_id — Shopify produkt-ID, bruges som fælles gruppe-ID for varianter af samme produkt',
-  'title — produktnavn',
-  'body_html — produktbeskrivelse med HTML (brug STRIP_HTML mapping for at fjerne HTML)',
-  'vendor — leverandør/brand navn',
-  'handle — URL-slug',
-  'url — komplet produkt-URL inkl. domæne (https://...)',
-  'tags — kommaseparerede tags',
+  'item_group_id — Shopify product ID, used as the shared group ID for variants of the same product',
+  'title — product name',
+  'body_html — product description with HTML (use STRIP_HTML mapping to remove HTML)',
+  'vendor — vendor/brand name',
+  'handle — URL slug',
+  'url — full product URL including domain (https://...)',
+  'tags — comma-separated tags',
   'status — active/draft/archived',
-  'product_type — produktkategori fra Shopify',
-  'published_at / created_at / updated_at — datoer',
-  'collections — array af kollektion-navne',
-  'variants[0].id — variant-ID (brug i variant feed mode)',
-  'variants[0].title — varianttitel',
-  'variants[0].price — pris som decimal-streng uden valuta, f.eks. "199.00"',
-  'variants[0].compare_at_price — vejledende pris uden valuta',
-  'variants[0].sku — lagervarenummer',
-  'variants[0].barcode — EAN/GTIN/UPC stregkode',
-  'variants[0].weight — vaegt i gram',
-  'variants[0].inventory_quantity — lagerbeholdning (heltal)',
-  'variants[0].option1 / option2 / option3 — variationsmuligheder',
-  'images[0].src — URL til første produktbillede',
-  'images[1].src — URL til andet produktbillede',
+  'product_type — product category from Shopify',
+  'published_at / created_at / updated_at — dates',
+  'collections — array of collection names',
+  'variants[0].id — variant ID (use in variant feed mode)',
+  'variants[0].title — variant title',
+  'variants[0].price — price as decimal string without currency, e.g. "199.00"',
+  'variants[0].compare_at_price — compare-at price without currency',
+  'variants[0].sku — stock keeping unit',
+  'variants[0].barcode — EAN/GTIN/UPC barcode',
+  'variants[0].weight — weight in grams',
+  'variants[0].inventory_quantity — inventory quantity (integer)',
+  'variants[0].option1 / option2 / option3 — variant options',
+  'images[0].src — URL to the first product image',
+  'images[1].src — URL to the second product image',
 ]
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
 function formatMappedFieldsList(mappings: ExistingMapping[]): string {
-  if (!mappings.length) return '  (ingen — alle felter er åbne for forslag)'
+  if (!mappings.length) return '  (none — all fields are open for suggestion)'
   return mappings
     .map((m) => {
       if (m.mapping_type === 'FIELD') return `  ${m.google_field} → FIELD: ${m.config.field ?? '?'}`
@@ -65,7 +65,7 @@ function buildProductText(products: SupabaseProduct[]): string {
       const v0 = variants[0] ?? {}
 
       const lines: string[] = [
-        `Produkt ${i + 1}:`,
+        `Product ${i + 1}:`,
         `  title: ${p.title ?? ''}`,
         `  vendor: ${p.vendor ?? ''}`,
         `  product_type: ${p.product_type ?? ''}`,
@@ -81,8 +81,8 @@ function buildProductText(products: SupabaseProduct[]): string {
         `  variants[0].option1: ${v0.option1 ?? ''}`,
         `  variants[0].option2: ${v0.option2 ?? ''}`,
         `  variants[0].weight: ${v0.weight ?? ''}`,
-        `  images[0].src: ${images[0]?.src ? String(images[0].src).slice(0, 80) : '(intet)'}`,
-        `  images[1].src: ${images[1]?.src ? '(URL til billede)' : '(intet)'}`,
+        `  images[0].src: ${images[0]?.src ? String(images[0].src).slice(0, 80) : '(none)'}`,
+        `  images[1].src: ${images[1]?.src ? '(image URL)' : '(none)'}`,
       ]
 
       if (p.metafields.length > 0) {
@@ -111,7 +111,7 @@ function buildPrompt(
   const metafieldsText =
     metafields.length > 0
       ? metafields.map((m) => `  metafield:${m.namespace}.${m.key}`).join('\n')
-      : '  (ingen metafields fundet)'
+      : '  (no metafields found)'
 
   const standardFieldsText = SHOPIFY_STANDARD_FIELDS.map((f) => `  ${f}`).join('\n')
   const existingText = formatMappedFieldsList(existingMappings)
@@ -119,79 +119,80 @@ function buildPrompt(
 
   const idInstruction =
     feedMode === 'variant'
-      ? 'id: Brug variants[0].id (ét feed-item per variant). item_group_id: Brug item_group_id feltet (fælles ID for alle varianter af samme produkt).'
-      : 'id: Brug item_group_id feltet (ét feed-item per produkt).'
+      ? 'id: Use variants[0].id (one feed item per variant). item_group_id: Use the item_group_id field (shared ID for all variants of the same product).'
+      : 'id: Use the item_group_id field (one feed item per product).'
 
-  return `Du er ekspert i Google Shopping Merchant Center og Shopify e-commerce.
+  return `You are an expert in Google Shopping Merchant Center and Shopify e-commerce.
 
-=== KONTEKST ===
-Feed mode: ${feedMode === 'variant' ? 'VARIANT (ét feed-item per variant)' : 'PRODUKT (ét feed-item per produkt)'}
-Butikkens valuta: ${currency}
-Produktdata sprog: ${locale}
+=== CONTEXT ===
+Feed mode: ${feedMode === 'variant' ? 'VARIANT (one feed item per variant)' : 'PRODUCT (one feed item per product)'}
+Store currency: ${currency}
+Product data language: ${locale}
 
-Produkttitler, beskrivelser og tags i eksemplerne nedenfor er på sproget "${locale}".
+Product titles, descriptions and tags in the examples below are in the language "${locale}". All your reasoning and reason-field text MUST be written in English.
 
-=== ALLEREDE MAPPEDE FELTER (SPRING OVER) ===
-Disse felter er allerede mappet og må IKKE overskrives. Foreslå INGEN mapping for nogen af disse felter — heller ikke hvis du mener den nuværende er forkert:
+=== ALREADY MAPPED FIELDS (SKIP) ===
+These fields are already mapped and MUST NOT be overwritten. Suggest NO mapping for any of these fields — not even if you think the current one is wrong:
 ${existingText}
 
-=== GOOGLE SHOPPING FELTKRAV ===
+=== GOOGLE SHOPPING FIELD REQUIREMENTS ===
 ${idInstruction}
-title: Max 150 tegn. Ingen HTML. Ingen salgsfraser ("køb nu", "gratis fragt" osv.).
-description: Max 5000 tegn. Ingen HTML-tags. Ingen salgsfraser. Ingen links. Brug body_html som kilde — men typen i mappingen skal sættes til STRIP_HTML for at fjerne HTML.
-link: Komplet URL med https://. Brug "url" feltet.
-image_link: Komplet https:// URL. Ingen vandmærker. Ingen tekst-overlay.
-additional_image_link: Samme krav som image_link.
-availability: PRÆCIS én af: in_stock, out_of_stock, preorder, backorder. Kræver beregning fra inventory — spring over.
-price: Format "TAL VALUTA" med punktum som decimalseparator og mellemrum før valutakode. Eksempel: "199.00 ${currency}". variants[0].price indeholder kun tallet — tilføj " ${currency}" som suffix via PREFIX_SUFFIX mapping (men foreslå foreløbig som field).
-sale_price: Samme format som price. Kun hvis compare_at_price eksisterer og er højere end price.
-brand: Max 70 tegn. Ikke "N/A" eller "Generic". Brug vendor.
-gtin: Kun tal. Max 14 cifre. Gyldige formater: UPC (12 cifre), EAN (13 cifre), ISBN (13 cifre). Brug variants[0].barcode.
-mpn: Max 70 tegn. Producent-tildelt varenummer. Brug variants[0].sku.
-condition: PRÆCIS én af: new, refurbished, used. Analyser produkterne — foreslå ALTID som static mapping.
-google_product_category: Skal være et heltal ID fra Googles officielle taksonomi. IKKE en tekststreng. Kun hvis du er sikker på kategorien.
-product_type: Max 750 tegn. Brug stinavns-format "Kategori > Underkategori". Brug product_type feltet.
-item_group_id: Fælles ID for alle varianter. Max 50 tegn. Brug item_group_id feltet.
-color: Max 100 tegn. Ingen tal eller hex-koder. Adskil farver med /. Brug option-felter eller metafields.
-size: Max 100 tegn. Brug option-felter eller metafields.
-gender: PRÆCIS én af: male, female, unisex. Kun hvis relevant for produkttypen.
-age_group: PRÆCIS én af: newborn, infant, toddler, kids, adult. Kun hvis relevant.
-material: Max 200 tegn. Adskil materialer med /. Brug metafields hvis tilgængeligt.
-pattern: Max 100 tegn. Brug metafields hvis tilgængeligt.
-size_type: PRÆCIS én af: regular, petite, maternity, big, tall, plus.
-size_system: PRÆCIS én af: US, UK, EU, DE, FR, JP, CN, IT, BR, MEX, AU.
-shipping_weight: Format "TAL enhed". Eksempel: "1.5 kg". Enheder: lb, oz, g, kg. Brug variants[0].weight (er i gram — brug suffix " g").
+title: Max 150 chars. No HTML. No promotional phrases ("buy now", "free shipping", etc.).
+description: Max 5000 chars. No HTML tags. No promotional phrases. No links. Use body_html as source — but the mapping type must be set to STRIP_HTML to remove HTML.
+link: Full URL with https://. Use the "url" field.
+image_link: Full https:// URL. No watermarks. No text overlay.
+additional_image_link: Same requirements as image_link.
+availability: EXACTLY one of: in_stock, out_of_stock, preorder, backorder. Requires inventory calculation — skip.
+price: Format "NUMBER CURRENCY" with period as decimal separator and a space before the currency code. Example: "199.00 ${currency}". variants[0].price contains only the number — append " ${currency}" as a suffix via PREFIX_SUFFIX mapping (but for now suggest it as a field).
+sale_price: Same format as price. Only if compare_at_price exists and is higher than price.
+brand: Max 70 chars. Not "N/A" or "Generic". Use vendor.
+gtin: Digits only. Max 14 digits. Valid formats: UPC (12 digits), EAN (13 digits), ISBN (13 digits). Use variants[0].barcode.
+mpn: Max 70 chars. Manufacturer part number. Use variants[0].sku.
+condition: EXACTLY one of: new, refurbished, used. Analyze the products — ALWAYS suggest as a static mapping.
+google_product_category: Must be an integer ID from Google's official taxonomy. NOT a text string. Only if you are confident about the category.
+product_type: Max 750 chars. Use path-style format "Category > Subcategory". Use the product_type field.
+item_group_id: Shared ID for all variants. Max 50 chars. Use the item_group_id field.
+color: Max 100 chars. No numbers or hex codes. Separate colors with /. Use option fields or metafields.
+size: Max 100 chars. Use option fields or metafields.
+gender: EXACTLY one of: male, female, unisex. Only if relevant to the product type.
+age_group: EXACTLY one of: newborn, infant, toddler, kids, adult. Only if relevant.
+material: Max 200 chars. Separate materials with /. Use metafields when available.
+pattern: Max 100 chars. Use metafields when available.
+size_type: EXACTLY one of: regular, petite, maternity, big, tall, plus.
+size_system: EXACTLY one of: US, UK, EU, DE, FR, JP, CN, IT, BR, MEX, AU.
+shipping_weight: Format "NUMBER unit". Example: "1.5 kg". Units: lb, oz, g, kg. Use variants[0].weight (it is in grams — use suffix " g").
 
-=== TILGÆNGELIGE SHOPIFY FELTER ===
-Standard felter:
+=== AVAILABLE SHOPIFY FIELDS ===
+Standard fields:
 ${standardFieldsText}
 
-Metafelter i denne butik:
+Metafields in this store:
 ${metafieldsText}
 
-=== EKSEMPEL PRODUKTER ===
+=== EXAMPLE PRODUCTS ===
 ${productsText}
 
-=== INSTRUKTIONER ===
-1. Analyser feltnavne og dataformater — ikke hvad butikken sælger
-2. Foreslå KUN forslag for felter der IKKE allerede er på listen ovenfor — overskriv aldrig en eksisterende mapping
-3. Spring "availability" over — kræver beregning
-4. Brug "high" confidence kun ved direkte teknisk match mellem feltnavne eller dataformater
-5. Returner KUN JSON array — ingen forklaring, ingen markdown, ingen kommentarer
+=== INSTRUCTIONS ===
+1. Analyze field names and data formats — not what the store sells
+2. ONLY suggest mappings for fields that are NOT already on the list above — never overwrite an existing mapping
+3. Skip "availability" — it requires calculation
+4. Use "high" confidence only when there is a direct technical match between field names or data formats
+5. Return ONLY a JSON array — no explanation, no markdown, no comments
 
-VIGTIGE REGLER:
-- Lav KUN forslag baseret på teknisk feltstruktur og dataformat — ikke baseret på hvad butikken sælger
-- Nævn ALDRIG hvad butikken sælger i reason feltet — hold forklaringerne tekniske og generelle
-- For condition feltet: foreslå KUN static mapping hvis du kan se direkte bevis i produktdataene (f.eks. et metafelt der hedder "condition" eller "tilstand") — ellers spring condition over
-- For google_product_category: foreslå KUN et metafelt hvis du kan se at metafeltet indeholder et heltal ID — aldrig et hardkodet kategori ID
-- custom_label forslag skal KUN baseres på at metafeltet eksisterer og har konsistente værdier på tværs af produkterne — ikke på hvad værdien betyder for den specifikke branche
-- confidence "high" må kun bruges når der er et direkte teknisk match mellem feltnavne eller dataformater
-- reason feltet skal forklare det tekniske match — ikke forretningslogikken bag
+IMPORTANT RULES:
+- Make suggestions ONLY based on technical field structure and data format — not on what the store sells
+- NEVER mention what the store sells in the reason field — keep explanations technical and generic
+- For the condition field: ONLY suggest a static mapping if you see direct evidence in the product data (e.g. a metafield called "condition") — otherwise skip condition
+- For google_product_category: ONLY suggest a metafield if you can see that the metafield contains an integer ID — never a hard-coded category ID
+- custom_label suggestions must ONLY be based on the metafield existing and having consistent values across the products — not on what the value means for the specific industry
+- confidence "high" may only be used when there is a direct technical match between field names or data formats
+- The reason field must explain the technical match — not the underlying business logic
+- All reason-field text MUST be in English regardless of the product data language
 
-JSON format (begge typer):
+JSON format (both types):
 [
-  { "google_field": "title", "shopify_field": "title", "mapping_type": "field", "confidence": "high", "reason": "Direkte navnematch" },
-  { "google_field": "condition", "shopify_field": null, "mapping_type": "static", "static_value": "new", "confidence": "high", "reason": "Begrundelse baseret på produktanalyse" }
+  { "google_field": "title", "shopify_field": "title", "mapping_type": "field", "confidence": "high", "reason": "Direct name match" },
+  { "google_field": "condition", "shopify_field": null, "mapping_type": "static", "static_value": "new", "confidence": "high", "reason": "Reasoning based on product analysis" }
 ]`
 }
 
@@ -206,15 +207,15 @@ export async function POST(req: Request) {
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   if (!process.env.ANTHROPIC_API_KEY) {
-    return NextResponse.json({ error: 'ANTHROPIC_API_KEY er ikke konfigureret' }, { status: 500 })
+    return NextResponse.json({ error: 'ANTHROPIC_API_KEY is not configured' }, { status: 500 })
   }
 
   const url = new URL(req.url)
   const feedId = url.searchParams.get('feedId')
-  if (!feedId) return NextResponse.json({ error: 'feedId mangler' }, { status: 400 })
+  if (!feedId) return NextResponse.json({ error: 'feedId is missing' }, { status: 400 })
 
   const owned = await getOwnedFeed(user.id, feedId)
-  if (!owned) return NextResponse.json({ error: 'Feed ikke fundet' }, { status: 404 })
+  if (!owned) return NextResponse.json({ error: 'Feed not found' }, { status: 404 })
 
   // Existing mappings come from the client (live state — may include unsaved
   // changes the user just made). The route used to load these from

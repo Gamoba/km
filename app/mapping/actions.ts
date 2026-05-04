@@ -23,7 +23,7 @@ export async function saveMappings(
   if (!user) redirect('/login')
 
   const owned = await getOwnedFeed(user.id, feedId)
-  if (!owned) return { error: 'Feed ikke fundet' }
+  if (!owned) return { error: 'Feed not found' }
 
   const db = adminDb()
 
@@ -116,6 +116,6 @@ export async function saveMappings(
 
     return {}
   } catch (err) {
-    return { error: err instanceof Error ? err.message : 'Ukendt fejl' }
+    return { error: err instanceof Error ? err.message : 'Unknown error' }
   }
 }

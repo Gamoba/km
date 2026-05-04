@@ -23,7 +23,7 @@ export async function GET(
   // Confirm the feed exists (no auth check — feed XML endpoints are public)
   const { data: feedRow } = await db.from('feeds').select('id').eq('id', feedId).maybeSingle()
   if (!feedRow) {
-    return xmlResponse('<?xml version="1.0" encoding="UTF-8"?><error>Feed ikke fundet</error>', 404)
+    return xmlResponse('<?xml version="1.0" encoding="UTF-8"?><error>Feed not found</error>', 404)
   }
 
   const { data: cached } = await db
@@ -43,7 +43,7 @@ export async function GET(
     const [{ xml, productCount }, validation] = await Promise.all([
       generateFeed(feedId),
       validateFeed(feedId).catch((err) => {
-        console.error('Validation fejlede under public feed-generering:', err)
+        console.error('Validation failed during public feed generation:', err)
         return null as ValidationResult | null
       }),
     ])
@@ -62,7 +62,7 @@ export async function GET(
 
     return xmlResponse(xml)
   } catch (err) {
-    const msg = err instanceof Error ? err.message : 'Ukendt fejl'
+    const msg = err instanceof Error ? err.message : 'Unknown error'
     return xmlResponse(
       `<?xml version="1.0" encoding="UTF-8"?><error>${msg}</error>`,
       500
@@ -85,13 +85,13 @@ export async function POST(
   if (!user) return Response.json({ error: 'Unauthorized' }, { status: 401 })
 
   const owned = await getOwnedFeed(user.id, feedId)
-  if (!owned) return Response.json({ error: 'Feed ikke fundet' }, { status: 404 })
+  if (!owned) return Response.json({ error: 'Feed not found' }, { status: 404 })
 
   try {
     const [{ xml, productCount }, validation] = await Promise.all([
       generateFeed(feedId),
       validateFeed(feedId).catch((err) => {
-        console.error('Validation fejlede under feed-regenerering:', err)
+        console.error('Validation failed during feed regeneration:', err)
         return null as ValidationResult | null
       }),
     ])
@@ -122,7 +122,7 @@ export async function POST(
     })
   } catch (err) {
     return Response.json(
-      { error: err instanceof Error ? err.message : 'Ukendt fejl' },
+      { error: err instanceof Error ? err.message : 'Unknown error' },
       { status: 500 }
     )
   }

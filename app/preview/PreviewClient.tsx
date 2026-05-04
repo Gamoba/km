@@ -14,7 +14,7 @@ function FieldValue({ value }: { value: string | undefined }) {
   if (!value) {
     return (
       <span style={{ fontSize: '10px', fontStyle: 'italic', color: 'var(--color-text-tertiary)' }}>
-        Tom
+        Empty
       </span>
     )
   }
@@ -62,7 +62,7 @@ function ProductView({ rows, googleFields }: { rows: PreviewRow[]; googleFields:
         >
           <input
             type="search"
-            placeholder="Søg produkt…"
+            placeholder="Search product…"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             className="ff-input"
@@ -71,7 +71,7 @@ function ProductView({ rows, googleFields }: { rows: PreviewRow[]; googleFields:
         <div className="overflow-y-auto flex-1">
           {filtered.length === 0 ? (
             <p className="p-3" style={{ fontSize: '11px', color: 'var(--color-text-tertiary)' }}>
-              Ingen produkter
+              No products
             </p>
           ) : (
             filtered.map((row) => (
@@ -92,7 +92,7 @@ function ProductView({ rows, googleFields }: { rows: PreviewRow[]; googleFields:
                     color: selectedId === row.productId ? 'var(--color-badge-accent-text)' : 'var(--color-text-primary)',
                   }}
                 >
-                  {row.title || '(uden titel)'}
+                  {row.title || '(untitled)'}
                 </div>
                 <div
                   className="ff-mono truncate mt-0.5"
@@ -113,7 +113,7 @@ function ProductView({ rows, googleFields }: { rows: PreviewRow[]; googleFields:
             className="flex-1 flex items-center justify-center"
             style={{ fontSize: '12px', color: 'var(--color-text-tertiary)' }}
           >
-            Vælg et produkt til venstre
+            Select a product on the left
           </div>
         ) : (
           <div className="overflow-y-auto flex-1">
@@ -130,7 +130,7 @@ function ProductView({ rows, googleFields }: { rows: PreviewRow[]; googleFields:
                   className="mb-1"
                   style={{ fontSize: '11px', fontWeight: 500, color: 'var(--color-badge-warning-text)' }}
                 >
-                  Obligatoriske felter ikke mappet:
+                  Required fields not mapped:
                 </p>
                 <div className="flex flex-wrap gap-1">
                   {unmappedRequired.map((f) => (
@@ -144,8 +144,8 @@ function ProductView({ rows, googleFields }: { rows: PreviewRow[]; googleFields:
             <table className="ff-table">
               <thead>
                 <tr>
-                  <th style={{ width: '180px' }}>Google felt</th>
-                  <th>Værdi</th>
+                  <th style={{ width: '180px' }}>Google field</th>
+                  <th>Value</th>
                 </tr>
               </thead>
               <tbody>
@@ -168,7 +168,7 @@ function ProductView({ rows, googleFields }: { rows: PreviewRow[]; googleFields:
                       <td>
                         {missing ? (
                           <span style={{ fontSize: '11px', fontWeight: 500, color: 'var(--color-badge-danger-text)' }}>
-                            Mangler
+                            Missing
                           </span>
                         ) : (
                           <FieldValue value={value} />
@@ -210,10 +210,10 @@ function FieldView({ rows, googleFields }: { rows: PreviewRow[]; googleFields: s
               </div>
               <div className="flex items-center gap-2">
                 {emptyCount > 0 && (
-                  <span className="ff-badge ff-badge-warning">{emptyCount} tomme</span>
+                  <span className="ff-badge ff-badge-warning">{emptyCount} empty</span>
                 )}
                 <span style={{ fontSize: '10px', color: 'var(--color-text-tertiary)', textTransform: 'none', letterSpacing: 0 }}>
-                  første {Math.min(preview.length, 10)} poster
+                  first {Math.min(preview.length, 10)} entries
                 </span>
               </div>
             </div>
@@ -223,7 +223,7 @@ function FieldView({ rows, googleFields }: { rows: PreviewRow[]; googleFields: s
                   <tr key={row.productId}>
                     <td style={{ width: '260px' }}>
                       <div className="truncate" style={{ fontSize: '11px', color: 'var(--color-text-secondary)' }}>
-                        {row.title || '(uden titel)'}
+                        {row.title || '(untitled)'}
                       </div>
                     </td>
                     <td>
@@ -259,12 +259,12 @@ export function PreviewClient({
           <h1 className="ff-topbar-title">{feedName} · Preview</h1>
           <span style={{ fontSize: '11px', color: 'var(--color-text-tertiary)' }}>
             {data.rows.length}
-            {data.feedMode === 'variant' ? ' varianter' : ' produkter'}
+            {data.feedMode === 'variant' ? ' variants' : ' products'}
             {data.totalProducts !== data.rows.length
-              ? ` (${data.rows.length} af ${data.totalProducts})`
+              ? ` (${data.rows.length} of ${data.totalProducts})`
               : ''}
             {' · '}
-            {data.googleFields.length} felter
+            {data.googleFields.length} fields
           </span>
         </div>
         <div
@@ -284,7 +284,7 @@ export function PreviewClient({
                 color: tab === t ? '#ffffff' : 'var(--color-text-secondary)',
               }}
             >
-              {t === 'product' ? 'Produkt visning' : 'Felt visning'}
+              {t === 'product' ? 'Product view' : 'Field view'}
             </button>
           ))}
         </div>
@@ -296,7 +296,7 @@ export function PreviewClient({
             className="ff-panel py-12 text-center"
             style={{ fontSize: '12px', color: 'var(--color-text-tertiary)' }}
           >
-            Ingen produkter matcher de aktuelle filtre.
+            No products match the current filters.
           </div>
         ) : tab === 'product' ? (
           <ProductView rows={data.rows} googleFields={data.googleFields} />

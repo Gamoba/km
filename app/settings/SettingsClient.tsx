@@ -53,20 +53,20 @@ function MarketCard({
           <span style={{ fontSize: '12px', fontWeight: 500, color: 'var(--color-text-primary)' }}>
             {market.name}
           </span>
-          {isPrimary && <span className="ff-badge ff-badge-accent">Primær</span>}
-          {!isActive && <span className="ff-badge ff-badge-neutral">Kladde</span>}
+          {isPrimary && <span className="ff-badge ff-badge-accent">Primary</span>}
+          {!isActive && <span className="ff-badge ff-badge-neutral">Draft</span>}
         </div>
         <div
           className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5"
           style={{ fontSize: '11px', color: 'var(--color-text-tertiary)' }}
         >
           <span>
-            <span style={{ fontWeight: 500, color: 'var(--color-text-secondary)' }}>Valuta:</span>{' '}
+            <span style={{ fontWeight: 500, color: 'var(--color-text-secondary)' }}>Currency:</span>{' '}
             {market.currency} — {market.currencyName}
           </span>
           {allLocales.length > 0 && (
             <span>
-              <span style={{ fontWeight: 500, color: 'var(--color-text-secondary)' }}>Sprog:</span>{' '}
+              <span style={{ fontWeight: 500, color: 'var(--color-text-secondary)' }}>Languages:</span>{' '}
               {allLocales.map((l) => `${l.name} (${l.locale})`).join(', ')}
             </span>
           )}
@@ -142,7 +142,7 @@ export function SettingsClient({
         setSelectedCountry((current) => current || match?.countryCodes[0] || '')
       })
       .catch((err: unknown) => {
-        setMarketsError(err instanceof Error ? err.message : 'Kunne ikke hente markets')
+        setMarketsError(err instanceof Error ? err.message : 'Could not fetch markets')
       })
       .finally(() => setLoadingMarkets(false))
   }, [initialSettings])
@@ -203,7 +203,7 @@ export function SettingsClient({
       setSaveStatus('saved')
       setTimeout(() => setSaveStatus('idle'), 2500)
     } catch (err) {
-      setSaveError(err instanceof Error ? err.message : 'Gem fejlede')
+      setSaveError(err instanceof Error ? err.message : 'Save failed')
       setSaveStatus('error')
     } finally {
       setSaving(false)
@@ -218,10 +218,10 @@ export function SettingsClient({
       const res = await fetch(`/api/shopify/sync?feedId=${encodeURIComponent(feedId)}`, { method: 'POST' })
       const data = (await res.json()) as { synced?: number; durationMs?: number; error?: string }
       if (data.error) throw new Error(data.error)
-      setSyncMsg(`Synkronisering færdig — ${data.synced ?? 0} produkter på ${((data.durationMs ?? 0) / 1000).toFixed(1)}s`)
+      setSyncMsg(`Sync complete — ${data.synced ?? 0} products in ${((data.durationMs ?? 0) / 1000).toFixed(1)}s`)
       setSyncState('done')
     } catch (err) {
-      setSyncMsg(err instanceof Error ? err.message : 'Sync fejlede')
+      setSyncMsg(err instanceof Error ? err.message : 'Sync failed')
       setSyncState('error')
     }
   }
@@ -230,15 +230,15 @@ export function SettingsClient({
     <div className="min-h-screen">
       <header className="ff-topbar">
         <div className="flex items-center gap-3">
-          <h1 className="ff-topbar-title">{feedName} · Indstillinger</h1>
+          <h1 className="ff-topbar-title">{feedName} · Settings</h1>
           <span style={{ fontSize: '11px', color: 'var(--color-text-tertiary)' }}>
-            Market og sprog til dette feed
+            Market and language for this feed
           </span>
         </div>
         <div className="flex items-center gap-2">
           {saveStatus === 'saved' && (
             <span style={{ fontSize: '11px', fontWeight: 500, color: 'var(--color-badge-success-text)' }}>
-              Gemt
+              Saved
             </span>
           )}
           {saveStatus === 'error' && (
@@ -257,7 +257,7 @@ export function SettingsClient({
             disabled={saving || syncState === 'running' || !selectedMarket || !dirty}
             className="ff-btn-secondary"
           >
-            {saving ? 'Gemmer…' : 'Gem'}
+            {saving ? 'Saving…' : 'Save'}
           </button>
           <button
             onClick={saveAndSync}
@@ -270,10 +270,10 @@ export function SettingsClient({
                   <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                   <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
                 </svg>
-                Synkroniserer…
+                Syncing…
               </>
             ) : (
-              'Gem og synkroniser'
+              'Save and sync'
             )}
           </button>
         </div>
@@ -287,7 +287,7 @@ export function SettingsClient({
             <div>
               <span style={{ fontSize: '12px', fontWeight: 500, color: 'var(--color-text-primary)' }}>Market</span>
               <span className="ml-2" style={{ fontSize: '11px', color: 'var(--color-text-tertiary)' }}>
-                Vælg Shopify market
+                Choose Shopify market
               </span>
             </div>
           </div>
@@ -302,7 +302,7 @@ export function SettingsClient({
                   <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                   <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
                 </svg>
-                Henter markets fra Shopify…
+                Loading markets from Shopify…
               </div>
             )}
 
@@ -316,7 +316,7 @@ export function SettingsClient({
                 }}
               >
                 <p style={{ fontSize: '12px', fontWeight: 500, color: 'var(--color-badge-danger-text)' }}>
-                  Kunne ikke hente markets
+                  Could not fetch markets
                 </p>
                 <p
                   className="ff-mono mt-1"
@@ -329,7 +329,7 @@ export function SettingsClient({
 
             {!loadingMarkets && !marketsError && markets.length === 0 && (
               <p style={{ fontSize: '12px', color: 'var(--color-text-tertiary)' }}>
-                Ingen markets fundet — din butik har muligvis ikke Shopify Markets aktiveret.
+                No markets found — your store may not have Shopify Markets enabled.
               </p>
             )}
 
@@ -353,9 +353,9 @@ export function SettingsClient({
           <div className="ff-panel">
             <div className="ff-panel-header" style={{ textTransform: 'none', letterSpacing: 0, fontSize: '11px' }}>
               <div>
-                <span style={{ fontSize: '12px', fontWeight: 500, color: 'var(--color-text-primary)' }}>Sprog</span>
+                <span style={{ fontSize: '12px', fontWeight: 500, color: 'var(--color-text-primary)' }}>Language</span>
                 <span className="ml-2" style={{ fontSize: '11px', color: 'var(--color-text-tertiary)' }}>
-                  Tilknyttet {selectedMarket.name}
+                  Linked to {selectedMarket.name}
                 </span>
               </div>
             </div>
@@ -363,7 +363,7 @@ export function SettingsClient({
             <div className="p-3.5 space-y-3">
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="ff-label block mb-1.5">Sprog</label>
+                  <label className="ff-label block mb-1.5">Language</label>
                   <select
                     value={selectedLocale}
                     onChange={(e) => setSelectedLocale(e.target.value)}
@@ -371,7 +371,7 @@ export function SettingsClient({
                   >
                     {availableLocales.map((l) => (
                       <option key={l.locale} value={l.locale}>
-                        {l.name} ({l.locale}){l.primary ? ' — standard' : ''}
+                        {l.name} ({l.locale}){l.primary ? ' — default' : ''}
                       </option>
                     ))}
                   </select>
@@ -386,7 +386,7 @@ export function SettingsClient({
                       borderRadius: '4px',
                     }}
                   >
-                    <p className="ff-label">Valuta</p>
+                    <p className="ff-label">Currency</p>
                     <p className="mt-0.5" style={{ fontSize: '12px', fontWeight: 500, color: 'var(--color-text-primary)' }}>
                       {currency} — {selectedMarket.currencyName}
                     </p>
@@ -410,7 +410,7 @@ export function SettingsClient({
                   <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
                 </svg>
                 <p style={{ fontSize: '11px', color: 'var(--color-badge-warning-text)' }}>
-                  Ændring af sprog kræver en ny synkronisering — produkttitler og beskrivelser hentes på det valgte sprog via Shopifys oversættelses-API.
+                  Changing the language requires a new sync — product titles and descriptions are fetched in the selected language via Shopify&apos;s translation API.
                 </p>
               </div>
             </div>
@@ -423,7 +423,7 @@ export function SettingsClient({
             <div>
               <span style={{ fontSize: '12px', fontWeight: 500, color: 'var(--color-text-primary)' }}>Feed mode</span>
               <span className="ml-2" style={{ fontSize: '11px', color: 'var(--color-text-tertiary)' }}>
-                Hvordan feedet struktureres
+                How the feed is structured
               </span>
             </div>
           </div>
@@ -432,14 +432,14 @@ export function SettingsClient({
             <div className="grid grid-cols-2 gap-3">
               <FeedModeCard
                 selected={feedMode === 'product'}
-                title="Produkt"
-                description="Ét feed item per produkt. Bruger første variants data."
+                title="Product"
+                description="One feed item per product. Uses the first variant's data."
                 onClick={() => setFeedMode('product')}
               />
               <FeedModeCard
                 selected={feedMode === 'variant'}
                 title="Variant"
-                description="Ét feed item per variant. Grupperer varianter med item_group_id."
+                description="One feed item per variant. Groups variants with item_group_id."
                 onClick={() => setFeedMode('variant')}
               />
             </div>

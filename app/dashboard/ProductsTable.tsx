@@ -11,7 +11,7 @@ function StatusBadge({ status }: { status: string }) {
     draft: 'ff-badge ff-badge-neutral',
     archived: 'ff-badge ff-badge-danger',
   }
-  const labels: Record<string, string> = { active: 'Aktiv', draft: 'Kladde', archived: 'Arkiveret' }
+  const labels: Record<string, string> = { active: 'Active', draft: 'Draft', archived: 'Archived' }
   return (
     <span className={cls[status] ?? 'ff-badge ff-badge-neutral'}>
       {labels[status] ?? status}
@@ -59,7 +59,7 @@ function ProductRow({ product }: { product: ShopifyProduct }) {
             {' · '}
             <span className="ff-mono">{product.handle}</span>
             {' · '}
-            {product.variants.length} variant{product.variants.length !== 1 ? 'er' : ''}
+            {product.variants.length} variant{product.variants.length !== 1 ? 's' : ''}
             {' · '}
             {product.metafields.length} metafield{product.metafields.length !== 1 ? 's' : ''}
           </div>
@@ -98,7 +98,7 @@ function stripAndTruncate(html: string | null | undefined, max: number): string 
 function formatDate(iso: string | null): string {
   if (!iso) return '—'
   try {
-    return new Date(iso).toLocaleString('da-DK', {
+    return new Date(iso).toLocaleString('en-US', {
       day: '2-digit',
       month: '2-digit',
       year: 'numeric',
@@ -161,9 +161,9 @@ function ExpandedProduct({ product }: { product: ShopifyProduct }) {
       className="px-3.5 py-3 space-y-4"
       style={{ borderTop: '1px solid var(--color-border-tertiary)' }}
     >
-      {/* Produkt info */}
+      {/* Product info */}
       <section>
-        <SectionHeader>Produkt info</SectionHeader>
+        <SectionHeader>Product info</SectionHeader>
         <div className="space-y-1.5">
           <InfoRow label="Title">{product.title || '—'}</InfoRow>
           <InfoRow label="Description">{description || '—'}</InfoRow>
@@ -177,8 +177,8 @@ function ExpandedProduct({ product }: { product: ShopifyProduct }) {
               '—'
             ) : (
               <span className="inline-flex flex-wrap gap-1">
-                {collections.map((c) => (
-                  <span key={c} className="ff-badge ff-badge-neutral">
+                {collections.map((c, i) => (
+                  <span key={`${c}-${i}`} className="ff-badge ff-badge-neutral">
                     {c}
                   </span>
                 ))}
@@ -205,20 +205,20 @@ function ExpandedProduct({ product }: { product: ShopifyProduct }) {
         </div>
       </section>
 
-      {/* Varianter */}
+      {/* Variants */}
       {product.variants.length > 0 && (
         <section>
-          <SectionHeader>Varianter ({product.variants.length})</SectionHeader>
+          <SectionHeader>Variants ({product.variants.length})</SectionHeader>
           <table className="ff-table">
             <thead>
               <tr>
-                <th>Titel</th>
-                <th>Pris</th>
+                <th>Title</th>
+                <th>Price</th>
                 <th>Compare at</th>
                 <th>SKU</th>
                 <th>Barcode</th>
-                <th>Lager</th>
-                <th>Vægt</th>
+                <th>Inventory</th>
+                <th>Weight</th>
               </tr>
             </thead>
             <tbody>
@@ -247,7 +247,7 @@ function ExpandedProduct({ product }: { product: ShopifyProduct }) {
         <SectionHeader>Metafields ({product.metafields.length})</SectionHeader>
         {product.metafields.length === 0 ? (
           <span style={{ fontSize: '11px', color: 'var(--color-text-tertiary)' }}>
-            Ingen metafields
+            No metafields
           </span>
         ) : (
           <table className="ff-table">
@@ -255,7 +255,7 @@ function ExpandedProduct({ product }: { product: ShopifyProduct }) {
               <tr>
                 <th style={{ width: '34%' }}>Namespace · Key</th>
                 <th style={{ width: '90px' }}>Type</th>
-                <th>Værdi</th>
+                <th>Value</th>
               </tr>
             </thead>
             <tbody>
@@ -325,7 +325,7 @@ function PaginationBar({
             </option>
           ))}
         </select>
-        <span style={{ fontSize: '11px', color: 'var(--color-text-tertiary)' }}>per side</span>
+        <span style={{ fontSize: '11px', color: 'var(--color-text-tertiary)' }}>per page</span>
       </div>
 
       <div className="flex items-center gap-2">
@@ -335,7 +335,7 @@ function PaginationBar({
           disabled={!canPrev}
           className="ff-btn-secondary"
         >
-          Forrige
+          Previous
         </button>
         <button
           type="button"
@@ -343,12 +343,12 @@ function PaginationBar({
           disabled={!canNext}
           className="ff-btn-secondary"
         >
-          Næste
+          Next
         </button>
       </div>
 
       <span style={{ fontSize: '11px', color: 'var(--color-text-tertiary)' }}>
-        Side {page} af {totalPages}
+        Page {page} of {totalPages}
       </span>
     </div>
   )
@@ -381,7 +381,7 @@ export function ProductsTable({
     <div>
       <input
         type="search"
-        placeholder="Søg titel, leverandør, handle, tags…"
+        placeholder="Search title, vendor, handle, tags…"
         value={search}
         onChange={(e) => onSearchChange(e.target.value)}
         className="ff-input mb-3"
@@ -402,8 +402,8 @@ export function ProductsTable({
           style={{ fontSize: '12px', color: 'var(--color-text-tertiary)' }}
         >
           {search
-            ? 'Ingen produkter matcher søgningen.'
-            : 'Ingen produkter på denne side.'}
+            ? 'No products match your search.'
+            : 'No products on this page.'}
         </div>
       )}
 

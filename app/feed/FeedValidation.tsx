@@ -37,8 +37,8 @@ function StatusBanner({ result }: { result: ValidationResult }) {
   const warnCount = result.issues.filter((i) => i.type === 'warning').length
   const subtitle =
     result.productsChecked > 0
-      ? `${result.productsChecked} produkter tjekket`
-      : 'Sidste gemte validering — kør igen for opdateret resultat'
+      ? `${result.productsChecked} products checked`
+      : 'Last saved validation — run again for updated result'
 
   if (result.status === 'ok') {
     return (
@@ -53,10 +53,10 @@ function StatusBanner({ result }: { result: ValidationResult }) {
       >
         <IconCheck />
         <div>
-          <p style={{ fontSize: '12px', fontWeight: 500 }}>Feed er klar til Google Merchant Center</p>
+          <p style={{ fontSize: '12px', fontWeight: 500 }}>Feed is ready for Google Merchant Center</p>
           <p className="mt-0.5" style={{ fontSize: '11px', opacity: 0.85 }}>
             {result.productsChecked > 0
-              ? `${result.productsChecked} produkter tjekket — ingen problemer fundet`
+              ? `${result.productsChecked} products checked — no issues found`
               : subtitle}
           </p>
         </div>
@@ -78,7 +78,7 @@ function StatusBanner({ result }: { result: ValidationResult }) {
         <IconWarning />
         <div>
           <p style={{ fontSize: '12px', fontWeight: 500 }}>
-            {warnCount} advarsel{warnCount !== 1 ? 'er' : ''} — feedet virker men kan forbedres
+            {warnCount} {warnCount === 1 ? 'warning' : 'warnings'} — feed works but can be improved
           </p>
           <p className="mt-0.5" style={{ fontSize: '11px', opacity: 0.85 }}>
             {subtitle}
@@ -101,8 +101,8 @@ function StatusBanner({ result }: { result: ValidationResult }) {
       <IconError />
       <div>
         <p style={{ fontSize: '12px', fontWeight: 500 }}>
-          {errorCount} fejl — feedet vil blive afvist af Google
-          {warnCount > 0 && ` · ${warnCount} advarsel${warnCount !== 1 ? 'er' : ''}`}
+          {errorCount} {errorCount === 1 ? 'error' : 'errors'} — feed will be rejected by Google
+          {warnCount > 0 && ` · ${warnCount} ${warnCount === 1 ? 'warning' : 'warnings'}`}
         </p>
         <p className="mt-0.5" style={{ fontSize: '11px', opacity: 0.85 }}>
           {subtitle}
@@ -139,7 +139,7 @@ function IssueRow({ issue }: { issue: ValidationIssue }) {
             {issue.field}
           </code>
           <span className={`ff-badge ${isError ? 'ff-badge-danger' : 'ff-badge-warning'}`}>
-            {isError ? 'Fejl' : 'Advarsel'}
+            {isError ? 'Error' : 'Warning'}
           </span>
         </div>
         <p className="mt-1" style={{ fontSize: '12px', color: 'var(--color-text-primary)' }}>{issue.message}</p>
@@ -154,15 +154,15 @@ function IssueRow({ issue }: { issue: ValidationIssue }) {
               wordBreak: 'break-all',
             }}
           >
-            <span style={{ color: 'var(--color-text-tertiary)' }}>Eksempel: </span>
-            {issue.exampleValue === '' ? <em style={{ fontStyle: 'italic' }}>(tom)</em> : issue.exampleValue}
+            <span style={{ color: 'var(--color-text-tertiary)' }}>Example: </span>
+            {issue.exampleValue === '' ? <em style={{ fontStyle: 'italic' }}>(empty)</em> : issue.exampleValue}
           </div>
         )}
       </div>
       {issue.affectedCount > 0 && (
         <div className="shrink-0 text-right">
           <span className="ff-badge ff-badge-neutral">
-            {issue.affectedCount} produkt{issue.affectedCount !== 1 ? 'er' : ''}
+            {issue.affectedCount} {issue.affectedCount === 1 ? 'product' : 'products'}
           </span>
         </div>
       )}
@@ -192,7 +192,7 @@ export function FeedValidation({
   return (
     <div className="ff-panel">
       <div className="ff-panel-header">
-        <span>Feed validering</span>
+        <span>Feed validation</span>
         <button onClick={onRun} disabled={isRunning} className="ff-btn-primary">
           {isRunning ? (
             <>
@@ -200,10 +200,10 @@ export function FeedValidation({
                 <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                 <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
               </svg>
-              Validerer…
+              Validating…
             </>
           ) : (
-            'Kør validering'
+            'Run validation'
           )}
         </button>
       </div>
@@ -227,7 +227,7 @@ export function FeedValidation({
             className="text-center py-4"
             style={{ fontSize: '11px', color: 'var(--color-text-tertiary)' }}
           >
-            Klik &quot;Kør validering&quot; for at tjekke dit feed mod Google krav
+            Click &quot;Run validation&quot; to check your feed against Google&apos;s requirements
           </p>
         )}
 
@@ -236,7 +236,7 @@ export function FeedValidation({
             className="text-center py-4"
             style={{ fontSize: '11px', color: 'var(--color-text-tertiary)' }}
           >
-            Henter og validerer de første 20 produkter…
+            Fetching and validating the first 20 products…
           </p>
         )}
 
@@ -248,7 +248,7 @@ export function FeedValidation({
               <div className="space-y-3">
                 {errors.length > 0 && (
                   <div>
-                    <p className="ff-label mb-2">Fejl ({errors.length})</p>
+                    <p className="ff-label mb-2">Errors ({errors.length})</p>
                     <div
                       className="px-3"
                       style={{ border: '1px solid var(--color-border-tertiary)', borderRadius: '4px' }}
@@ -262,7 +262,7 @@ export function FeedValidation({
 
                 {warnings.length > 0 && (
                   <div>
-                    <p className="ff-label mb-2">Advarsler ({warnings.length})</p>
+                    <p className="ff-label mb-2">Warnings ({warnings.length})</p>
                     <div
                       className="px-3"
                       style={{ border: '1px solid var(--color-border-tertiary)', borderRadius: '4px' }}

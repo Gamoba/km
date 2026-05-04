@@ -397,7 +397,7 @@ async function fetchAllActiveProducts(
       .eq('status', 'active')
       .order('created_at', { ascending: true })
       .range(from, from + PAGE_SIZE - 1)
-    if (error) throw new Error(`Produkter fejlede: ${error.message}`)
+    if (error) throw new Error(`Products failed: ${error.message}`)
     if (!data || data.length === 0) break
     out.push(...(data as SupabaseProduct[]))
     if (data.length < PAGE_SIZE) break
@@ -423,7 +423,7 @@ export async function generateFeed(feedId: string): Promise<FeedResult> {
     db.from('feed_filters').select('filter_type, operator, rules').eq('feed_id', feedId),
   ])
 
-  if (mappingsErr) throw new Error(`Mappings fejlede: ${mappingsErr.message}`)
+  if (mappingsErr) throw new Error(`Mappings failed: ${mappingsErr.message}`)
 
   const feedMode = (settingsData?.feed_mode as 'product' | 'variant') ?? 'product'
   const marketUrl = (shopSettingsData?.market_url as string | null) ?? null

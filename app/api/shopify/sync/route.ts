@@ -15,12 +15,12 @@ export async function POST(req: Request) {
   const url = new URL(req.url)
   const feedId = url.searchParams.get('feedId')
   if (!feedId) {
-    return Response.json({ error: 'feedId mangler' }, { status: 400 })
+    return Response.json({ error: 'feedId is missing' }, { status: 400 })
   }
 
   const owned = await getOwnedFeed(user.id, feedId)
   if (!owned) {
-    return Response.json({ error: 'Feed ikke fundet' }, { status: 404 })
+    return Response.json({ error: 'Feed not found' }, { status: 404 })
   }
 
   try {
@@ -28,7 +28,7 @@ export async function POST(req: Request) {
     return Response.json(result)
   } catch (err) {
     return Response.json(
-      { error: err instanceof Error ? err.message : 'Ukendt fejl' },
+      { error: err instanceof Error ? err.message : 'Unknown error' },
       { status: 500 }
     )
   }

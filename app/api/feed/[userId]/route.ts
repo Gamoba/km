@@ -22,7 +22,7 @@ export async function GET(
   const feed = await getFirstFeed(userId)
   if (!feed) {
     return xmlResponse(
-      '<?xml version="1.0" encoding="UTF-8"?><error>Ingen feeds fundet for bruger</error>',
+      '<?xml version="1.0" encoding="UTF-8"?><error>No feeds found for user</error>',
       404
     )
   }
@@ -57,7 +57,7 @@ export async function GET(
 
     return xmlResponse(xml)
   } catch (err) {
-    const msg = err instanceof Error ? err.message : 'Ukendt fejl'
+    const msg = err instanceof Error ? err.message : 'Unknown error'
     return xmlResponse(
       `<?xml version="1.0" encoding="UTF-8"?><error>${msg}</error>`,
       500

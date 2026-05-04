@@ -11,12 +11,12 @@ import { colors, layout } from '@/lib/design-tokens'
 // Per-feed nav rendered when a feedId is in the URL. Hrefs are built relative
 // to /feed/[feedId]/ at render time.
 const FEED_NAV = [
-  { label: 'Oversigt', href: '', icon: 'rss' },
-  { label: 'Produkter', href: 'products', icon: 'box' },
+  { label: 'Overview', href: '', icon: 'rss' },
+  { label: 'Products', href: 'products', icon: 'box' },
   { label: 'Mapping', href: 'mapping', icon: 'sliders' },
-  { label: 'Filtre', href: 'filters', icon: 'filter' },
+  { label: 'Filters', href: 'filters', icon: 'filter' },
   { label: 'Preview', href: 'preview', icon: 'eye' },
-  { label: 'Indstillinger', href: 'settings', icon: 'settings' },
+  { label: 'Settings', href: 'settings', icon: 'settings' },
 ] as const
 
 const TOP_NAV = [
@@ -295,7 +295,7 @@ export function Sidebar() {
           }}
         >
           <LogOutIcon />
-          Log ud
+          Log out
         </button>
       </div>
     </aside>

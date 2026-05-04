@@ -16,10 +16,10 @@ export async function signIn(
   const password = formData.get('password')
 
   if (!email || typeof email !== 'string' || !email.trim()) {
-    return { ...prevState, error: 'Indtast en gyldig e-mailadresse.' }
+    return { ...prevState, error: 'Enter a valid email address.' }
   }
   if (!password || typeof password !== 'string' || password.length < 6) {
-    return { ...prevState, error: 'Adgangskoden skal være mindst 6 tegn.' }
+    return { ...prevState, error: 'Password must be at least 6 characters.' }
   }
 
   const supabase = await createSupabaseServerClient()
@@ -43,10 +43,10 @@ export async function signUp(
   const password = formData.get('password')
 
   if (!email || typeof email !== 'string' || !email.trim()) {
-    return { ...prevState, error: 'Indtast en gyldig e-mailadresse.' }
+    return { ...prevState, error: 'Enter a valid email address.' }
   }
   if (!password || typeof password !== 'string' || password.length < 6) {
-    return { ...prevState, error: 'Adgangskoden skal være mindst 6 tegn.' }
+    return { ...prevState, error: 'Password must be at least 6 characters.' }
   }
 
   const supabase = await createSupabaseServerClient()

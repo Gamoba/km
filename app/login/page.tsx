@@ -20,25 +20,25 @@ export default function LoginPage() {
       <div className="w-full max-w-sm">
         <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-8">
           <h1 className="text-2xl font-semibold text-gray-900 mb-2">
-            {mode === 'login' ? 'Log ind' : 'Opret konto'}
+            {mode === 'login' ? 'Sign in' : 'Create account'}
           </h1>
           <p className="text-sm text-gray-500 mb-6">
             {mode === 'login'
-              ? 'Log ind med din e-mail og adgangskode.'
-              : 'Opret en ny konto med e-mail og adgangskode.'}
+              ? 'Sign in with your email and password.'
+              : 'Create a new account with email and password.'}
           </p>
 
           {mode === 'signup' && signupState.error === null && signupState !== initialState ? (
             <div className="rounded-xl bg-green-50 border border-green-200 p-4 text-center">
-              <p className="text-sm font-medium text-green-800">Konto oprettet</p>
+              <p className="text-sm font-medium text-green-800">Account created</p>
               <p className="text-sm text-green-700 mt-1">
-                Du kan nu logge ind med din e-mail og adgangskode.
+                You can now sign in with your email and password.
               </p>
               <button
                 onClick={() => setMode('login')}
                 className="mt-3 text-sm font-medium text-green-800 underline"
               >
-                Gå til login
+                Go to sign in
               </button>
             </div>
           ) : (
@@ -48,7 +48,7 @@ export default function LoginPage() {
                   htmlFor="email"
                   className="block text-sm font-medium text-gray-700 mb-1.5"
                 >
-                  E-mailadresse
+                  Email address
                 </label>
                 <input
                   id="email"
@@ -56,7 +56,7 @@ export default function LoginPage() {
                   type="email"
                   autoComplete="email"
                   required
-                  placeholder="dig@eksempel.dk"
+                  placeholder="you@example.com"
                   className="w-full rounded-lg border border-gray-300 bg-white px-3.5 py-2.5 text-sm text-gray-900 placeholder-gray-400 shadow-xs focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 disabled:opacity-50"
                   disabled={isPending}
                 />
@@ -67,7 +67,7 @@ export default function LoginPage() {
                   htmlFor="password"
                   className="block text-sm font-medium text-gray-700 mb-1.5"
                 >
-                  Adgangskode
+                  Password
                 </label>
                 <input
                   id="password"
@@ -94,33 +94,33 @@ export default function LoginPage() {
                 className="w-full rounded-lg bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white shadow-xs hover:bg-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 disabled:opacity-60 disabled:cursor-not-allowed transition-colors"
               >
                 {isPending
-                  ? 'Vent…'
+                  ? 'Please wait…'
                   : mode === 'login'
-                  ? 'Log ind'
-                  : 'Opret konto'}
+                  ? 'Sign in'
+                  : 'Create account'}
               </button>
 
               <p className="text-center text-sm text-gray-500">
                 {mode === 'login' ? (
                   <>
-                    Ingen konto?{' '}
+                    No account?{' '}
                     <button
                       type="button"
                       onClick={() => setMode('signup')}
                       className="font-medium text-indigo-600 hover:text-indigo-500"
                     >
-                      Opret én her
+                      Create one here
                     </button>
                   </>
                 ) : (
                   <>
-                    Har du allerede en konto?{' '}
+                    Already have an account?{' '}
                     <button
                       type="button"
                       onClick={() => setMode('login')}
                       className="font-medium text-indigo-600 hover:text-indigo-500"
                     >
-                      Log ind
+                      Sign in
                     </button>
                   </>
                 )}

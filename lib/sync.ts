@@ -116,7 +116,7 @@ export async function syncProducts(feedId: string): Promise<SyncResult> {
       .from('products')
       .upsert(productRows, { onConflict: 'feed_id,shopify_id' })
       .select('id, shopify_id')
-    if (upsertErr) throw new Error(`Bulk upsert af produkter fejlede: ${upsertErr.message}`)
+    if (upsertErr) throw new Error(`Bulk upsert of products failed: ${upsertErr.message}`)
     upserted = data ?? []
   }
   const tUpsertProducts = Date.now()
@@ -146,7 +146,7 @@ export async function syncProducts(feedId: string): Promise<SyncResult> {
       )
     )
     for (const r of results) {
-      if (r.error) throw new Error(`Bulk delete af metafields fejlede: ${r.error.message}`)
+      if (r.error) throw new Error(`Bulk delete of metafields failed: ${r.error.message}`)
     }
   }
   const tDeleteMfs = Date.now()
@@ -182,7 +182,7 @@ export async function syncProducts(feedId: string): Promise<SyncResult> {
     const { error: mfErr } = await db
       .from('product_metafields')
       .upsert(allMetafields, { onConflict: 'feed_id,product_id,namespace,key' })
-    if (mfErr) throw new Error(`Bulk upsert af metafields fejlede: ${mfErr.message}`)
+    if (mfErr) throw new Error(`Bulk upsert of metafields failed: ${mfErr.message}`)
   }
   const tUpsertMfs = Date.now()
   console.log(
@@ -195,7 +195,7 @@ export async function syncProducts(feedId: string): Promise<SyncResult> {
     .select('id, shopify_id')
     .eq('feed_id', feedId)
 
-  if (fetchErr) throw new Error(`Hentning til oprydning fejlede: ${fetchErr.message}`)
+  if (fetchErr) throw new Error(`Fetch for cleanup failed: ${fetchErr.message}`)
 
   const staleIds = (existingProducts ?? [])
     .filter((row) => !syncedShopifyIds.has(row.shopify_id))
@@ -214,7 +214,7 @@ export async function syncProducts(feedId: string): Promise<SyncResult> {
       staleChunks.map((chunk) => db.from('products').delete().in('id', chunk))
     )
     for (const r of results) {
-      if (r.error) throw new Error(`Oprydning af udgåede produkter fejlede: ${r.error.message}`)
+      if (r.error) throw new Error(`Cleanup of stale products failed: ${r.error.message}`)
     }
   }
   const tCleanup = Date.now()
@@ -241,7 +241,7 @@ export async function getProductsForFeed(feedId: string): Promise<SupabaseProduc
     .eq('feed_id', feedId)
     .order('created_at', { ascending: true })
 
-  if (error) throw new Error(`Hentning fra Supabase fejlede: ${error.message}`)
+  if (error) throw new Error(`Fetch from Supabase failed: ${error.message}`)
 
   return (data ?? []) as SupabaseProduct[]
 }

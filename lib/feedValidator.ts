@@ -127,7 +127,7 @@ export async function validateFeed(feedId: string): Promise<ValidationResult> {
       issues.push({
         field,
         type: 'error',
-        message: `ID er tomt eller blank på ${blanks.length} af ${total} produkter`,
+        message: `ID is empty or blank on ${blanks.length} of ${total} products`,
         affectedCount: blanks.length,
       })
       continue
@@ -138,14 +138,14 @@ export async function validateFeed(feedId: string): Promise<ValidationResult> {
       issues.push({
         field,
         type: 'error',
-        message: `Tom værdi på ${blanks.length} af ${total} produkter (${Math.round(pct)} %) — over 50 % grænsen`,
+        message: `Empty value on ${blanks.length} of ${total} products (${Math.round(pct)} %) — above the 50 % threshold`,
         affectedCount: blanks.length,
       })
     } else {
       issues.push({
         field,
         type: 'warning',
-        message: `Tom værdi på ${blanks.length} af ${total} produkter`,
+        message: `Empty value on ${blanks.length} of ${total} products`,
         affectedCount: blanks.length,
       })
     }
@@ -186,7 +186,7 @@ export async function validateFeed(feedId: string): Promise<ValidationResult> {
       issues.push({
         field: 'price',
         type: 'error',
-        message: 'Pris bruger komma som decimalseparator — Google kræver punktum (f.eks. "199.00 EUR")',
+        message: 'Price uses comma as decimal separator — Google requires a period (e.g. "199.00 EUR")',
         affectedCount: buckets.comma.count,
         exampleValue: buckets.comma.example,
       })
@@ -195,7 +195,7 @@ export async function validateFeed(feedId: string): Promise<ValidationResult> {
       issues.push({
         field: 'price',
         type: 'error',
-        message: 'Pris mangler ISO valutakode efter tallet (f.eks. " DKK" eller " EUR")',
+        message: 'Price is missing the ISO currency code after the number (e.g. " USD" or " EUR")',
         affectedCount: buckets.noCurrency.count,
         exampleValue: buckets.noCurrency.example,
       })
@@ -204,7 +204,7 @@ export async function validateFeed(feedId: string): Promise<ValidationResult> {
       issues.push({
         field: 'price',
         type: 'warning',
-        message: 'Pris mangler mellemrum mellem tal og valutakode (f.eks. "199.00 EUR" i stedet for "199.00EUR")',
+        message: 'Price is missing a space between the number and the currency code (e.g. "199.00 EUR" instead of "199.00EUR")',
         affectedCount: buckets.missingSpace.count,
         exampleValue: buckets.missingSpace.example,
       })
@@ -213,7 +213,7 @@ export async function validateFeed(feedId: string): Promise<ValidationResult> {
       issues.push({
         field: 'price',
         type: 'error',
-        message: 'Ugyldig prisformat — skal være tal + mellemrum + ISO valutakode (f.eks. "199.00 EUR")',
+        message: 'Invalid price format — must be number + space + ISO currency code (e.g. "199.00 EUR")',
         affectedCount: buckets.wrongFormat.count,
         exampleValue: buckets.wrongFormat.example,
       })
@@ -227,7 +227,7 @@ export async function validateFeed(feedId: string): Promise<ValidationResult> {
       issues.push({
         field: 'availability',
         type: 'error',
-        message: 'Ugyldig tilgængelighed — skal være præcis: in_stock, out_of_stock, preorder eller backorder',
+        message: 'Invalid availability — must be exactly: in_stock, out_of_stock, preorder or backorder',
         affectedCount: bad.count,
         exampleValue: bad.example,
       })
@@ -241,7 +241,7 @@ export async function validateFeed(feedId: string): Promise<ValidationResult> {
       issues.push({
         field: 'link',
         type: 'error',
-        message: 'Link skal starte med "https://"',
+        message: 'Link must start with "https://"',
         affectedCount: bad.count,
         exampleValue: bad.example,
       })
@@ -255,7 +255,7 @@ export async function validateFeed(feedId: string): Promise<ValidationResult> {
       issues.push({
         field: 'image_link',
         type: 'error',
-        message: 'Billedlink skal starte med "https://"',
+        message: 'Image link must start with "https://"',
         affectedCount: bad.count,
         exampleValue: bad.example,
       })
@@ -269,7 +269,7 @@ export async function validateFeed(feedId: string): Promise<ValidationResult> {
       issues.push({
         field: 'title',
         type: 'warning',
-        message: 'Titel er for lang — Google anbefaler maks 150 tegn',
+        message: 'Title is too long — Google recommends max 150 characters',
         affectedCount: bad.count,
         exampleValue: bad.example ? truncate(bad.example) : undefined,
       })
@@ -283,7 +283,7 @@ export async function validateFeed(feedId: string): Promise<ValidationResult> {
       issues.push({
         field: 'description',
         type: 'warning',
-        message: 'Beskrivelse er for lang — Google anbefaler maks 5000 tegn',
+        message: 'Description is too long — Google recommends max 5000 characters',
         affectedCount: tooLong.count,
       })
     }
@@ -296,7 +296,7 @@ export async function validateFeed(feedId: string): Promise<ValidationResult> {
       issues.push({
         field: 'gtin',
         type: 'warning',
-        message: 'GTIN indeholder ikke-numeriske tegn',
+        message: 'GTIN contains non-numeric characters',
         affectedCount: bad.count,
         exampleValue: bad.example,
       })

@@ -16,7 +16,7 @@ export async function GET() {
     return Response.json(data)
   } catch (err) {
     return Response.json(
-      { error: err instanceof Error ? err.message : 'Ukendt fejl' },
+      { error: err instanceof Error ? err.message : 'Unknown error' },
       { status: 500 }
     )
   }

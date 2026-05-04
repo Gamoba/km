@@ -8,30 +8,30 @@ import type { FilterRule, FilterConfig } from './actions'
 // ── Static data ────────────────────────────────────────────────────────────
 
 const FILTER_FIELDS = [
-  { value: 'title', label: 'Titel' },
-  { value: 'vendor', label: 'Leverandør' },
-  { value: 'product_type', label: 'Produkttype' },
+  { value: 'title', label: 'Title' },
+  { value: 'vendor', label: 'Vendor' },
+  { value: 'product_type', label: 'Product type' },
   { value: 'tags', label: 'Tags' },
   { value: 'status', label: 'Status' },
   { value: 'handle', label: 'Handle' },
-  { value: 'variants[0].price', label: 'Pris' },
+  { value: 'variants[0].price', label: 'Price' },
   { value: 'variants[0].sku', label: 'SKU' },
-  { value: 'variants[0].inventory_quantity', label: 'Lager' },
-  { value: 'variants[0].barcode', label: 'Stregkode' },
+  { value: 'variants[0].inventory_quantity', label: 'Inventory' },
+  { value: 'variants[0].barcode', label: 'Barcode' },
   { value: '__metafield__', label: 'Metafield…' },
 ]
 
 const OPERATORS = [
-  { value: 'contains', label: 'indeholder' },
-  { value: 'does_not_contain', label: 'indeholder ikke' },
-  { value: 'equals', label: 'er lig med' },
-  { value: 'not_equals', label: 'er ikke lig med' },
-  { value: 'starts_with', label: 'starter med' },
-  { value: 'ends_with', label: 'slutter med' },
-  { value: 'is_empty', label: 'er tom' },
-  { value: 'is_not_empty', label: 'er ikke tom' },
-  { value: 'greater_than', label: '> større end' },
-  { value: 'less_than', label: '< mindre end' },
+  { value: 'contains', label: 'contains' },
+  { value: 'does_not_contain', label: 'does not contain' },
+  { value: 'equals', label: 'equals' },
+  { value: 'not_equals', label: 'does not equal' },
+  { value: 'starts_with', label: 'starts with' },
+  { value: 'ends_with', label: 'ends with' },
+  { value: 'is_empty', label: 'is empty' },
+  { value: 'is_not_empty', label: 'is not empty' },
+  { value: 'greater_than', label: '> greater than' },
+  { value: 'less_than', label: '< less than' },
 ]
 
 const NO_VALUE_OPS = new Set(['is_empty', 'is_not_empty'])
@@ -213,7 +213,7 @@ function RuleRow({
           type="text"
           value={rule.value}
           onChange={(e) => onChange({ value: e.target.value })}
-          placeholder="Værdi…"
+          placeholder="Value…"
           className={`${selectCls} flex-1 min-w-24`}
         />
       ) : (
@@ -224,7 +224,7 @@ function RuleRow({
         onClick={onDelete}
         className="shrink-0 w-6 h-6 flex items-center justify-center transition-colors"
         style={{ borderRadius: '4px', color: 'var(--color-text-tertiary)' }}
-        aria-label="Slet regel"
+        aria-label="Delete rule"
       >
         <XIcon />
       </button>
@@ -275,7 +275,7 @@ function FilterSection({
       <div className="p-3.5">
         {config.rules.length === 0 ? (
           <p className="text-center py-3" style={{ fontSize: '11px', color: 'var(--color-text-tertiary)' }}>
-            Ingen regler — klik + for at tilføje
+            No rules — click + to add one
           </p>
         ) : (
           <div className="space-y-1">
@@ -325,7 +325,7 @@ function FilterSection({
           style={{ fontSize: '11px', fontWeight: 500, color: 'var(--color-accent)' }}
         >
           <PlusIcon />
-          Tilføj regel
+          Add rule
         </button>
       </div>
     </div>
@@ -417,11 +417,11 @@ export function FiltersClient({
     <div className="min-h-screen">
       <header className="ff-topbar">
         <div className="flex items-center gap-3">
-          <h1 className="ff-topbar-title">{feedName} · Filtre</h1>
+          <h1 className="ff-topbar-title">{feedName} · Filters</h1>
           <span style={{ fontSize: '11px', color: 'var(--color-text-tertiary)' }}>
             {matchCount !== null && totalCount !== null
-              ? `${matchCount} af ${totalCount} produkter i feed`
-              : 'Henter…'}
+              ? `${matchCount} of ${totalCount} products in feed`
+              : 'Loading…'}
           </span>
         </div>
         <div className="flex items-center gap-2">
@@ -429,16 +429,16 @@ export function FiltersClient({
             <span style={{ fontSize: '11px', color: 'var(--color-badge-danger-text)' }}>{saveError}</span>
           )}
           <button onClick={handleSave} disabled={isPending} className="ff-btn-primary">
-            {isPending ? 'Gemmer…' : saveSuccess ? 'Gemt' : 'Gem regler'}
+            {isPending ? 'Saving…' : saveSuccess ? 'Saved' : 'Save rules'}
           </button>
         </div>
       </header>
 
       <main className="px-4 py-4 max-w-4xl space-y-3">
         <FilterSection
-          title="Inkluder produkter"
-          description="Kun produkter der matcher disse regler inkluderes. Ingen regler = alle produkter inkluderes."
-          badge="INKLUDER"
+          title="Include products"
+          description="Only products matching these rules are included. No rules = all products included."
+          badge="INCLUDE"
           badgeCls="ff-badge ff-badge-success"
           config={include}
           onAddRule={() => addRule('include')}
@@ -447,9 +447,9 @@ export function FiltersClient({
           onSetOperator={(op) => setOperator('include', op)}
         />
         <FilterSection
-          title="Ekskluder produkter"
-          description="Produkter der matcher disse regler fjernes fra feedet, selv hvis de matcher inkludér reglerne."
-          badge="EKSKLUDER"
+          title="Exclude products"
+          description="Products matching these rules are removed from the feed, even if they match the include rules."
+          badge="EXCLUDE"
           badgeCls="ff-badge ff-badge-danger"
           config={exclude}
           onAddRule={() => addRule('exclude')}

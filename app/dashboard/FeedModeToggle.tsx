@@ -23,7 +23,7 @@ export function FeedModeToggle({
 
   return (
     <div className="flex items-center gap-2">
-      <span className="ff-label">Feed tilstand</span>
+      <span className="ff-label">Feed mode</span>
       <div
         className="inline-flex overflow-hidden"
         style={{
@@ -48,7 +48,7 @@ export function FeedModeToggle({
               transition: 'background 0.12s ease',
             }}
           >
-            {m === 'product' ? 'Produkt' : 'Variant'}
+            {m === 'product' ? 'Product' : 'Variant'}
           </button>
         ))}
       </div>

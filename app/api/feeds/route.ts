@@ -33,25 +33,51 @@ export async function GET() {
     validation_errors: ValidationIssue[] | null
   }
 
-  let productCounts: { feed_id: string }[] | null = []
+  // Per-feed counts use head:true so PostgREST returns just a count header — no
+  // rows transferred, no 1000-row cap to bump into. Last-sync uses a per-feed
+  // ORDER BY ... LIMIT 1 for the same reason: a single .in() query across feeds
+  // would have its row set truncated and silently lose the newest feed's data.
+  const productCount = new Map<string, number>()
+  const lastSyncByFeed = new Map<string, string>()
   let caches: CacheRow[] | null = []
-  let lastSyncs: { feed_id: string; synced_at: string }[] | null = []
   let filterCounts: (readonly [string, { total: number; included: number }])[] = []
 
   try {
-    const results = await Promise.all([
-      feedIds.length
-        ? db.from('products').select('feed_id').in('feed_id', feedIds)
-        : Promise.resolve({ data: [] as { feed_id: string }[] }),
+    const [productCountResults, cacheResult, lastSyncResults, filterResults] = await Promise.all([
+      Promise.allSettled(
+        feedIds.map(
+          async (id) =>
+            [
+              id,
+              await db
+                .from('products')
+                .select('id', { count: 'exact', head: true })
+                .eq('feed_id', id),
+            ] as const
+        )
+      ),
       feedIds.length
         ? db
             .from('feed_cache')
             .select('feed_id, generated_at, product_count, validation_status, validation_errors')
             .in('feed_id', feedIds)
         : Promise.resolve({ data: [] as CacheRow[] }),
-      feedIds.length
-        ? db.from('products').select('feed_id, synced_at').in('feed_id', feedIds).not('synced_at', 'is', null)
-        : Promise.resolve({ data: [] as { feed_id: string; synced_at: string }[] }),
+      Promise.allSettled(
+        feedIds.map(
+          async (id) =>
+            [
+              id,
+              await db
+                .from('products')
+                .select('synced_at')
+                .eq('feed_id', id)
+                .not('synced_at', 'is', null)
+                .order('synced_at', { ascending: false })
+                .limit(1)
+                .maybeSingle(),
+            ] as const
+        )
+      ),
       // countFilteredProducts can throw for a single feed (DB error, etc.).
       // Use allSettled so one bad feed doesn't blow up the whole dashboard;
       // the failed feed just falls back to {0,0} included/excluded counts.
@@ -59,38 +85,45 @@ export async function GET() {
         feedIds.map(async (id) => [id, await countFilteredProducts(id)] as const)
       ),
     ])
-    productCounts = (results[0].data as { feed_id: string }[] | null) ?? []
-    caches = (results[1].data as CacheRow[] | null) ?? []
-    lastSyncs = (results[2].data as { feed_id: string; synced_at: string }[] | null) ?? []
-    filterCounts = results[3]
+
+    for (const r of productCountResults) {
+      if (r.status === 'fulfilled') {
+        const [id, res] = r.value
+        productCount.set(id, res.count ?? 0)
+      } else {
+        console.error('[/api/feeds] product count failed for one feed:', r.reason)
+      }
+    }
+
+    for (const r of lastSyncResults) {
+      if (r.status === 'fulfilled') {
+        const [id, res] = r.value
+        const syncedAt = (res.data as { synced_at: string } | null)?.synced_at
+        if (syncedAt) lastSyncByFeed.set(id, syncedAt)
+      } else {
+        console.error('[/api/feeds] last-sync lookup failed for one feed:', r.reason)
+      }
+    }
+
+    caches = (cacheResult.data as CacheRow[] | null) ?? []
+    filterCounts = filterResults
       .map((r) => {
         if (r.status === 'fulfilled') return r.value
-        console.error('[/api/feeds] countFilteredProducts fejlede for ét feed:', r.reason)
+        console.error('[/api/feeds] countFilteredProducts failed for one feed:', r.reason)
         return null
       })
       .filter((x): x is readonly [string, { total: number; included: number }] => x !== null)
   } catch (err) {
-    console.error('[/api/feeds] dashboard-data hentning fejlede:', err)
+    console.error('[/api/feeds] dashboard data fetch failed:', err)
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Ukendt serverfejl' },
+      { error: err instanceof Error ? err.message : 'Unknown server error' },
       { status: 500 }
     )
-  }
-
-  const productCount = new Map<string, number>()
-  for (const row of (productCounts ?? []) as { feed_id: string }[]) {
-    productCount.set(row.feed_id, (productCount.get(row.feed_id) ?? 0) + 1)
   }
 
   const cacheByFeed = new Map<string, CacheRow>()
   for (const row of (caches ?? []) as CacheRow[]) {
     cacheByFeed.set(row.feed_id, row)
-  }
-
-  const lastSyncByFeed = new Map<string, string>()
-  for (const row of (lastSyncs ?? []) as { feed_id: string; synced_at: string }[]) {
-    const prev = lastSyncByFeed.get(row.feed_id)
-    if (!prev || row.synced_at > prev) lastSyncByFeed.set(row.feed_id, row.synced_at)
   }
 
   const filterCountByFeed = new Map(filterCounts)
@@ -127,7 +160,7 @@ export async function POST(req: Request) {
 
   const body = (await req.json().catch(() => ({}))) as { name?: string; description?: string }
   const name = (body.name ?? '').trim()
-  if (!name) return NextResponse.json({ error: 'Navn er påkrævet' }, { status: 400 })
+  if (!name) return NextResponse.json({ error: 'Name is required' }, { status: 400 })
 
   const db = adminDb()
   const { data, error } = await db

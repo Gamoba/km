@@ -10,8 +10,8 @@ import { saveFeedMode } from './actions'
 // ── Step constants ─────────────────────────────────────────────────────────
 
 const STEPS = [
-  { id: 1, label: 'Navn' },
-  { id: 2, label: 'Market & sprog' },
+  { id: 1, label: 'Name' },
+  { id: 2, label: 'Market & language' },
   { id: 3, label: 'Feed mode' },
 ] as const
 
@@ -53,7 +53,7 @@ export function FeedWizardModal({ onClose }: { onClose: () => void }) {
         setMarkets(d.markets ?? [])
       })
       .catch((e: unknown) =>
-        setMarketsError(e instanceof Error ? e.message : 'Kunne ikke hente markets')
+        setMarketsError(e instanceof Error ? e.message : 'Could not fetch markets')
       )
       .finally(() => setLoadingMarkets(false))
   }, [step, markets.length, loadingMarkets, marketsError])
@@ -148,7 +148,7 @@ export function FeedWizardModal({ onClose }: { onClose: () => void }) {
 
       router.push(`/feed/${feedId}?syncing=1`)
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Kunne ikke oprette feed')
+      setError(e instanceof Error ? e.message : 'Could not create feed')
       setSubmitting(false)
     }
   }
@@ -169,12 +169,12 @@ export function FeedWizardModal({ onClose }: { onClose: () => void }) {
           style={{ textTransform: 'none', letterSpacing: 0, fontSize: '12px' }}
         >
           <span style={{ fontSize: '13px', fontWeight: 500, color: 'var(--color-text-primary)' }}>
-            Opret nyt feed
+            Create new feed
           </span>
           <button
             type="button"
             onClick={onClose}
-            aria-label="Luk"
+            aria-label="Close"
             style={{
               fontSize: '16px',
               lineHeight: 1,
@@ -241,7 +241,7 @@ export function FeedWizardModal({ onClose }: { onClose: () => void }) {
                 disabled={submitting}
                 className="ff-btn-secondary"
               >
-                Tilbage
+                Back
               </button>
             )}
           </div>
@@ -252,7 +252,7 @@ export function FeedWizardModal({ onClose }: { onClose: () => void }) {
               disabled={!canNext || submitting}
               className="ff-btn-primary"
             >
-              {submitting ? 'Opretter…' : isLast ? 'Opret feed' : 'Næste'}
+              {submitting ? 'Creating…' : isLast ? 'Create feed' : 'Next'}
             </button>
           </div>
         </div>
@@ -336,23 +336,23 @@ function Step1Name({
   return (
     <div className="space-y-3">
       <div>
-        <label className="ff-label block mb-1.5">Navn</label>
+        <label className="ff-label block mb-1.5">Name</label>
         <input
           type="text"
           value={name}
           onChange={(e) => onName(e.target.value)}
-          placeholder="f.eks. Hovedfeed DK"
+          placeholder="e.g. Main feed US"
           autoFocus
           className="ff-input"
           required
         />
       </div>
       <div>
-        <label className="ff-label block mb-1.5">Beskrivelse (valgfri)</label>
+        <label className="ff-label block mb-1.5">Description (optional)</label>
         <textarea
           value={description}
           onChange={(e) => onDescription(e.target.value)}
-          placeholder="Kort beskrivelse — fx hvilket marked feedet er målrettet"
+          placeholder="Short description — e.g. which market this feed targets"
           rows={3}
           className="ff-input"
           style={{ resize: 'none' }}
@@ -390,8 +390,8 @@ function Step2Market({
   return (
     <div className="space-y-3">
       <p style={{ fontSize: '11px', color: 'var(--color-text-tertiary)' }}>
-        Vælg hvilket Shopify market dette feed skal bruge — det styrer valuta, sprog og
-        lande-priser. Du kan altid ændre det senere.
+        Choose which Shopify market this feed should use — it controls currency, language and
+        country pricing. You can always change it later.
       </p>
 
       {loading && (
@@ -403,7 +403,7 @@ function Step2Market({
             <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
             <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
           </svg>
-          Henter markets fra Shopify…
+          Loading markets from Shopify…
         </div>
       )}
 
@@ -422,7 +422,7 @@ function Step2Market({
 
       {!loading && !error && markets.length === 0 && (
         <p style={{ fontSize: '12px', color: 'var(--color-text-tertiary)' }}>
-          Ingen markets fundet — du kan stadig oprette feedet og sætte det op senere.
+          No markets found — you can still create the feed and set it up later.
         </p>
       )}
 
@@ -442,7 +442,7 @@ function Step2Market({
       {selectedMarket && availableLocales.length > 0 && (
         <div className="grid grid-cols-2 gap-3 pt-1">
           <div>
-            <label className="ff-label block mb-1.5">Sprog</label>
+            <label className="ff-label block mb-1.5">Language</label>
             <select
               value={locale}
               onChange={(e) => onLocale(e.target.value)}
@@ -450,7 +450,7 @@ function Step2Market({
             >
               {availableLocales.map((l) => (
                 <option key={l.locale} value={l.locale}>
-                  {l.name} ({l.locale}){l.primary ? ' — standard' : ''}
+                  {l.name} ({l.locale}){l.primary ? ' — default' : ''}
                 </option>
               ))}
             </select>
@@ -464,7 +464,7 @@ function Step2Market({
                 borderRadius: '4px',
               }}
             >
-              <p className="ff-label">Valuta</p>
+              <p className="ff-label">Currency</p>
               <p
                 className="mt-0.5"
                 style={{ fontSize: '12px', fontWeight: 500, color: 'var(--color-text-primary)' }}
@@ -515,20 +515,20 @@ function MarketCard({
           <span style={{ fontSize: '12px', fontWeight: 500, color: 'var(--color-text-primary)' }}>
             {market.name}
           </span>
-          {isPrimary && <span className="ff-badge ff-badge-accent">Primær</span>}
-          {!isActive && <span className="ff-badge ff-badge-neutral">Kladde</span>}
+          {isPrimary && <span className="ff-badge ff-badge-accent">Primary</span>}
+          {!isActive && <span className="ff-badge ff-badge-neutral">Draft</span>}
         </div>
         <div
           className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5"
           style={{ fontSize: '11px', color: 'var(--color-text-tertiary)' }}
         >
           <span>
-            <span style={{ fontWeight: 500, color: 'var(--color-text-secondary)' }}>Valuta:</span>{' '}
+            <span style={{ fontWeight: 500, color: 'var(--color-text-secondary)' }}>Currency:</span>{' '}
             {market.currency} — {market.currencyName}
           </span>
           {allLocales.length > 0 && (
             <span>
-              <span style={{ fontWeight: 500, color: 'var(--color-text-secondary)' }}>Sprog:</span>{' '}
+              <span style={{ fontWeight: 500, color: 'var(--color-text-secondary)' }}>Languages:</span>{' '}
               {allLocales.map((l) => l.locale).join(', ')}
             </span>
           )}
@@ -550,19 +550,19 @@ function Step3Mode({
   return (
     <div className="space-y-3">
       <p style={{ fontSize: '11px', color: 'var(--color-text-tertiary)' }}>
-        Vælg hvordan feedet skal struktureres. Du kan altid ændre det senere.
+        Choose how the feed should be structured. You can always change it later.
       </p>
       <div className="grid grid-cols-2 gap-3">
         <ModeCard
           selected={mode === 'product'}
-          title="Produkt"
-          description="Ét feed item per produkt. Bruger første variants data."
+          title="Product"
+          description="One feed item per product. Uses the first variant's data."
           onClick={() => onMode('product')}
         />
         <ModeCard
           selected={mode === 'variant'}
           title="Variant"
-          description="Ét feed item per variant. Grupperer varianter med item_group_id."
+          description="One feed item per variant. Groups variants with item_group_id."
           onClick={() => onMode('variant')}
         />
       </div>

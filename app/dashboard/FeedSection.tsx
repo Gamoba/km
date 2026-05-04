@@ -40,7 +40,7 @@ export function FeedSection({
 
   return (
     <div className="ff-panel">
-      <div className="ff-panel-header">Dit feed</div>
+      <div className="ff-panel-header">Your feed</div>
 
       <div className="p-3.5 space-y-2">
         <div className="flex gap-2">
@@ -57,10 +57,10 @@ export function FeedSection({
             {origin ? feedUrl : `…/api/feed/generate/${feedId}`}
           </code>
           <button onClick={copyUrl} className="ff-btn-secondary shrink-0">
-            {copied ? 'Kopieret' : 'Kopiér URL'}
+            {copied ? 'Copied' : 'Copy URL'}
           </button>
           <button onClick={onRegenerate} disabled={isRegenerating} className="ff-btn-primary shrink-0">
-            {isRegenerating ? 'Genererer…' : 'Generer feed'}
+            {isRegenerating ? 'Generating…' : 'Generate feed'}
           </button>
         </div>
 
@@ -70,15 +70,15 @@ export function FeedSection({
 
         {cacheInfo?.generated_at ? (
           <p style={{ fontSize: '11px', color: 'var(--color-text-tertiary)' }}>
-            Sidst genereret:{' '}
-            {new Date(cacheInfo.generated_at).toLocaleString('da-DK')}
+            Last generated:{' '}
+            {new Date(cacheInfo.generated_at).toLocaleString('en-US')}
             {cacheInfo.product_count != null && (
-              <> &middot; {cacheInfo.product_count} produkter</>
+              <> &middot; {cacheInfo.product_count} products</>
             )}
           </p>
         ) : (
           <p style={{ fontSize: '11px', fontStyle: 'italic', color: 'var(--color-text-tertiary)' }}>
-            Feed er endnu ikke genereret
+            Feed has not been generated yet
           </p>
         )}
       </div>
