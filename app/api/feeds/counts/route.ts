@@ -7,7 +7,7 @@ import { countFilteredProducts } from '@/lib/feedGenerator'
 // through products + applies filter rules in JS — slow enough to be worth
 // loading after the feed cards are already on screen. Returns one entry per
 // feed; failures are dropped silently so one bad feed can't break the rest.
-export async function GET() {
+export async function GET(req: Request) {
   const supabase = await createSupabaseServerClient()
   const {
     data: { user },
@@ -16,10 +16,12 @@ export async function GET() {
 
   const db = adminDb()
 
-  const { data: feeds, error: feedsErr } = await db
-    .from('feeds')
-    .select('id')
-    .eq('user_id', user.id)
+  // Optional ?projectId narrows the (expensive) count workload to one project.
+  const projectId = new URL(req.url).searchParams.get('projectId')
+  let feedsQuery = db.from('feeds').select('id').eq('user_id', user.id)
+  if (projectId) feedsQuery = feedsQuery.eq('project_id', projectId)
+
+  const { data: feeds, error: feedsErr } = await feedsQuery
 
   if (feedsErr) {
     return NextResponse.json({ error: feedsErr.message }, { status: 500 })

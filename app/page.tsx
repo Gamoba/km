@@ -1,6 +1,6 @@
 import { redirect } from 'next/navigation'
 import { createSupabaseServerClient } from '@/lib/supabase-server'
-import { FeedListClient } from './dashboard/FeedListClient'
+import { ProjectListClient } from './projects/ProjectListClient'
 
 export default async function HomePage() {
   const supabase = await createSupabaseServerClient()
@@ -10,5 +10,5 @@ export default async function HomePage() {
 
   if (!user) redirect('/login')
 
-  return <FeedListClient />
+  return <ProjectListClient />
 }

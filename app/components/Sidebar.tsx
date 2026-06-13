@@ -20,7 +20,7 @@ const FEED_NAV = [
 ] as const
 
 const TOP_NAV = [
-  { label: 'Feeds', href: '/', icon: 'grid' },
+  { label: 'Projects', href: '/', icon: 'grid' },
 ] as const
 
 function active(pathname: string, href: string) {
@@ -121,7 +121,7 @@ function LogoIcon() {
 
 // ── Sidebar ────────────────────────────────────────────────────────────────
 
-type FeedSummary = { id: string; name: string }
+type FeedSummary = { id: string; name: string; project_id: string | null }
 
 export function Sidebar() {
   const pathname = usePathname()
@@ -197,6 +197,8 @@ export function Sidebar() {
   // Per-feed nav appears only when we're inside /feed/[feedId]/...
   const feedNavSection = activeFeedId ? (
     <>
+      {activeFeed?.project_id &&
+        navLink(`/project/${activeFeed.project_id}`, 'back', '← Back to project')}
       <div
         className="mt-3 mb-1 px-3"
         style={{

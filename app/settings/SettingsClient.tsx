@@ -81,11 +81,13 @@ function MarketCard({
 export function SettingsClient({
   feedId,
   feedName,
+  projectId,
   initialSettings,
   initialFeedMode,
 }: {
   feedId: string
   feedName: string
+  projectId: string | null
   initialSettings: SavedSettings | null
   initialFeedMode: 'product' | 'variant'
 }) {
@@ -126,7 +128,10 @@ export function SettingsClient({
   const dirty = shopSettingsDirty || feedModeDirty
 
   useEffect(() => {
-    fetch('/api/shopify/markets')
+    const marketsUrl = projectId
+      ? `/api/shopify/markets?projectId=${encodeURIComponent(projectId)}`
+      : '/api/shopify/markets'
+    fetch(marketsUrl)
       .then((r) => r.json())
       .then((data: { markets?: ShopifyMarket[]; error?: string }) => {
         if (data.error) throw new Error(data.error)
@@ -145,7 +150,7 @@ export function SettingsClient({
         setMarketsError(err instanceof Error ? err.message : 'Could not fetch markets')
       })
       .finally(() => setLoadingMarkets(false))
-  }, [initialSettings])
+  }, [initialSettings, projectId])
 
   function selectMarket(market: ShopifyMarket) {
     setSelectedMarketId(market.id)

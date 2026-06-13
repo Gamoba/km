@@ -1,9 +1,9 @@
 import { NextResponse } from 'next/server'
 import { createSupabaseServerClient } from '@/lib/supabase-server'
-import { adminDb } from '@/lib/feeds'
+import { adminDb, getOwnedProject } from '@/lib/feeds'
 import type { ValidationIssue } from '@/lib/feedValidator'
 
-export async function GET() {
+export async function GET(req: Request) {
   const supabase = await createSupabaseServerClient()
   const {
     data: { user },
@@ -12,11 +12,18 @@ export async function GET() {
 
   const db = adminDb()
 
-  const { data: feeds, error: feedsErr } = await db
+  // Optional ?projectId scopes the list to one project (project home page).
+  // Always filtered by user_id, so the project filter only narrows further.
+  const projectId = new URL(req.url).searchParams.get('projectId')
+  let feedsQuery = db
     .from('feeds')
-    .select('id, name, description, created_at, updated_at')
+    .select('id, name, description, project_id, created_at, updated_at')
     .eq('user_id', user.id)
-    .order('created_at', { ascending: true })
+  if (projectId) feedsQuery = feedsQuery.eq('project_id', projectId)
+
+  const { data: feeds, error: feedsErr } = await feedsQuery.order('created_at', {
+    ascending: true,
+  })
 
   if (feedsErr) {
     return NextResponse.json({ error: feedsErr.message }, { status: 500 })
@@ -120,6 +127,7 @@ export async function GET() {
       id: f.id,
       name: f.name,
       description: f.description,
+      project_id: f.project_id,
       created_at: f.created_at,
       updated_at: f.updated_at,
       productCount: productCount.get(f.id) ?? 0,
@@ -145,9 +153,21 @@ export async function POST(req: Request) {
   } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
-  const body = (await req.json().catch(() => ({}))) as { name?: string; description?: string }
+  const body = (await req.json().catch(() => ({}))) as {
+    name?: string
+    description?: string
+    project_id?: string
+  }
   const name = (body.name ?? '').trim()
   if (!name) return NextResponse.json({ error: 'Name is required' }, { status: 400 })
+
+  // A feed hangs on a project — project_id is required and must be owned.
+  if (!body.project_id) {
+    return NextResponse.json({ error: 'project_id er påkrævet' }, { status: 400 })
+  }
+  const owned = await getOwnedProject(user.id, body.project_id)
+  if (!owned) return NextResponse.json({ error: 'Project not found' }, { status: 404 })
+  const projectId = owned.id
 
   const db = adminDb()
   const { data, error } = await db
@@ -156,8 +176,9 @@ export async function POST(req: Request) {
       user_id: user.id,
       name,
       description: body.description?.trim() || null,
+      project_id: projectId,
     })
-    .select('id, name, description, created_at, updated_at')
+    .select('id, name, description, project_id, created_at, updated_at')
     .single()
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })

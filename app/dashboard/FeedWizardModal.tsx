@@ -17,7 +17,13 @@ const STEPS = [
 
 // ── Main component ─────────────────────────────────────────────────────────
 
-export function FeedWizardModal({ onClose }: { onClose: () => void }) {
+export function FeedWizardModal({
+  projectId,
+  onClose,
+}: {
+  projectId: string
+  onClose: () => void
+}) {
   const router = useRouter()
   const [step, setStep] = useState<number>(1)
 
@@ -46,7 +52,7 @@ export function FeedWizardModal({ onClose }: { onClose: () => void }) {
   useEffect(() => {
     if (step !== 2 || markets.length > 0 || loadingMarkets || marketsError) return
     setLoadingMarkets(true)
-    fetch('/api/shopify/markets')
+    fetch(`/api/shopify/markets?projectId=${encodeURIComponent(projectId)}`)
       .then((r) => r.json())
       .then((d: { markets?: ShopifyMarket[]; error?: string }) => {
         if (d.error) throw new Error(d.error)
@@ -56,7 +62,7 @@ export function FeedWizardModal({ onClose }: { onClose: () => void }) {
         setMarketsError(e instanceof Error ? e.message : 'Could not fetch markets')
       )
       .finally(() => setLoadingMarkets(false))
-  }, [step, markets.length, loadingMarkets, marketsError])
+  }, [step, markets.length, loadingMarkets, marketsError, projectId])
 
   function selectMarket(m: ShopifyMarket) {
     setMarketId(m.id)
@@ -97,7 +103,11 @@ export function FeedWizardModal({ onClose }: { onClose: () => void }) {
       const feedRes = await fetch('/api/feeds', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: name.trim(), description: description.trim() }),
+        body: JSON.stringify({
+          name: name.trim(),
+          description: description.trim(),
+          project_id: projectId,
+        }),
       })
       const feedData = (await feedRes.json()) as { feed?: { id: string }; error?: string }
       if (!feedRes.ok || feedData.error || !feedData.feed?.id) {

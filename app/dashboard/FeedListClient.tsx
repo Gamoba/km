@@ -26,7 +26,17 @@ type FeedSummary = {
 
 type PatchedFeed = { id: string; name: string; description: string | null }
 
-export function FeedListClient() {
+// Embedded inside a project page (/project/[projectId]). Scoped to that
+// project's feeds; the "Create new feed" action is gated on a verified Shopify
+// connection. `connected` defaults to true so any future standalone use isn't
+// accidentally locked out.
+export function FeedListClient({
+  projectId,
+  connected = true,
+}: {
+  projectId: string
+  connected?: boolean
+}) {
   const [feeds, setFeeds] = useState<FeedSummary[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [showCreate, setShowCreate] = useState(false)
@@ -36,7 +46,7 @@ export function FeedListClient() {
     try {
       // LAG 1 — feed list with cache, mappings, last-sync. The slow per-feed
       // included/excluded counts arrive separately so the cards render fast.
-      const res = await fetch('/api/feeds')
+      const res = await fetch(`/api/feeds?projectId=${encodeURIComponent(projectId)}`)
       const data = (await res.json()) as { feeds?: FeedSummary[]; error?: string }
       if (data.error) throw new Error(data.error)
       setFeeds(data.feeds ?? [])
@@ -50,7 +60,7 @@ export function FeedListClient() {
   // filters in JS, so it's an O(N feeds × M products) overall workload.
   async function loadCounts() {
     try {
-      const res = await fetch('/api/feeds/counts')
+      const res = await fetch(`/api/feeds/counts?projectId=${encodeURIComponent(projectId)}`)
       const data = (await res.json()) as {
         counts?: { feedId: string; included: number; excluded: number }[]
       }
@@ -74,7 +84,8 @@ export function FeedListClient() {
   useEffect(() => {
     load()
     loadCounts()
-  }, [])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectId])
 
   function handlePatched(updated: PatchedFeed) {
     setFeeds((prev) =>
@@ -90,29 +101,42 @@ export function FeedListClient() {
     setFeeds((prev) => (prev ? prev.filter((f) => f.id !== id) : prev))
   }
 
+  const createDisabledTitle = connected ? undefined : 'Connect Shopify first'
+
   return (
-    <div className="min-h-screen">
-      <header className="ff-topbar">
-        <div className="flex items-center gap-3">
-          <h1 className="ff-topbar-title">Feeds</h1>
+    <div className="ff-panel">
+      <div
+        className="ff-panel-header"
+        style={{ textTransform: 'none', letterSpacing: 0, fontSize: '11px' }}
+      >
+        <div className="flex items-center gap-2">
+          <span style={{ fontSize: '12px', fontWeight: 500, color: 'var(--color-text-primary)' }}>
+            Feeds
+          </span>
           {feeds && (
             <span style={{ fontSize: '11px', color: 'var(--color-text-tertiary)' }}>
-              {feeds.length} feed{feeds.length !== 1 ? 's' : ''}
+              {feeds.length}
             </span>
           )}
         </div>
-        <button onClick={() => setShowCreate(true)} className="ff-btn-primary">
+        <button
+          onClick={() => setShowCreate(true)}
+          disabled={!connected}
+          title={createDisabledTitle}
+          className="ff-btn-primary"
+        >
           Create new feed
         </button>
-      </header>
+      </div>
 
-      <main className="px-4 py-4 max-w-6xl">
+      <div className="p-3.5">
         {error && (
           <div
-            className="ff-panel p-4 mb-3"
+            className="p-2.5 mb-3"
             style={{
               background: 'var(--color-badge-danger-bg)',
-              borderColor: 'var(--color-badge-danger-text)',
+              border: '1px solid var(--color-badge-danger-text)',
+              borderRadius: '4px',
             }}
           >
             <p style={{ fontSize: '12px', color: 'var(--color-badge-danger-text)' }}>{error}</p>
@@ -121,17 +145,20 @@ export function FeedListClient() {
 
         {feeds === null ? (
           <div
-            className="ff-panel py-16 text-center"
+            className="py-12 text-center"
             style={{ fontSize: '12px', color: 'var(--color-text-tertiary)' }}
           >
             Loading feeds…
           </div>
         ) : feeds.length === 0 ? (
-          <div className="ff-panel py-16 flex flex-col items-center gap-3">
-            <p style={{ fontSize: '12px', color: 'var(--color-text-tertiary)' }}>
-              No feeds yet
-            </p>
-            <button onClick={() => setShowCreate(true)} className="ff-btn-primary">
+          <div className="py-12 flex flex-col items-center gap-3">
+            <p style={{ fontSize: '12px', color: 'var(--color-text-tertiary)' }}>No feeds yet</p>
+            <button
+              onClick={() => setShowCreate(true)}
+              disabled={!connected}
+              title={createDisabledTitle}
+              className="ff-btn-primary"
+            >
               Create your first feed
             </button>
           </div>
@@ -147,9 +174,11 @@ export function FeedListClient() {
             ))}
           </div>
         )}
-      </main>
+      </div>
 
-      {showCreate && <FeedWizardModal onClose={() => setShowCreate(false)} />}
+      {showCreate && (
+        <FeedWizardModal projectId={projectId} onClose={() => setShowCreate(false)} />
+      )}
     </div>
   )
 }

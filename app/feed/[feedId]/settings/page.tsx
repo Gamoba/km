@@ -39,6 +39,7 @@ export default async function FeedSettingsPage({
     <SettingsClient
       feedId={feedId}
       feedName={feed.name}
+      projectId={feed.project_id}
       initialSettings={
         settings
           ? {

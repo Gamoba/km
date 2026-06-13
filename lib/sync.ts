@@ -1,5 +1,5 @@
 import { createClient } from '@supabase/supabase-js'
-import { fetchProductsWithAllData, fetchProductsLocalized } from '@/lib/shopify'
+import { createShopifyClientForProject } from '@/lib/projectShopify'
 import type { ShopifyData } from '@/lib/shopify'
 
 function adminClient() {
@@ -66,19 +66,35 @@ export async function syncProducts(feedId: string): Promise<SyncResult> {
     `[sync] shop_settings: ${tSettings - t0}ms — ${JSON.stringify(settings)} — fejl: ${settingsErr?.message ?? 'ingen'}`
   )
 
+  // Credentials come from the feed's project. We derive the project from the
+  // feed itself (authoritative link) rather than taking a separate projectId —
+  // getOwnedFeed already guarantees the feed's project is owned by the caller.
+  // feeds.project_id is NOT NULL, so a missing one is a hard error.
+  const { data: feedRow } = await db
+    .from('feeds')
+    .select('project_id')
+    .eq('id', feedId)
+    .maybeSingle()
+  const projectId = (feedRow as { project_id: string | null } | null)?.project_id ?? null
+  if (!projectId) {
+    throw new Error(`Feed ${feedId} har intet project_id — kan ikke synkronisere`)
+  }
+  const shopify = await createShopifyClientForProject(db, projectId)
+  console.log(`[sync] credentials: project ${projectId}`)
+
   let shopifyData: ShopifyData
   if (settings?.selected_locale) {
     console.log(
       `[sync] Lokaliseret sync locale="${settings.selected_locale}", currency="${settings.currency ?? 'ingen'}", country="${settings.selected_country ?? 'ingen'}"`
     )
-    shopifyData = await fetchProductsLocalized(
+    shopifyData = await shopify.fetchProductsLocalized(
       settings.selected_locale,
       settings.currency ?? undefined,
       settings.selected_country ?? undefined
     )
   } else {
     console.log(`[sync] Standard sync (ingen selected_locale)`)
-    shopifyData = await fetchProductsWithAllData()
+    shopifyData = await shopify.fetchProductsWithAllData()
   }
   const tFetch = Date.now()
   console.log(

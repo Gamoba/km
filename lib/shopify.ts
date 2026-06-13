@@ -1,130 +1,12 @@
 const API_VERSION = '2025-07'
 
-function shopifyUrl(path: string): string {
-  return `https://${process.env.SHOPIFY_SHOP_URL}/admin/api/${API_VERSION}${path}`
-}
-
-function shopifyHeaders(): Record<string, string> {
-  return {
-    'X-Shopify-Access-Token': process.env.SHOPIFY_ACCESS_TOKEN!,
-    'Content-Type': 'application/json',
-  }
-}
-
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
-async function restGet(url: string): Promise<{ json: Record<string, unknown>; link: string }> {
-  const MAX_RETRIES = 4
-
-  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
-    const res = await fetch(url, { headers: shopifyHeaders() })
-
-    if (res.status === 429) {
-      if (attempt < MAX_RETRIES) {
-        const retryAfter = parseInt(res.headers.get('retry-after') ?? '2', 10)
-        const waitSec = isNaN(retryAfter) ? 2 : retryAfter
-        await sleep(waitSec * 1000)
-        continue
-      }
-      throw new Error('Shopify rate limit: too many attempts')
-    }
-
-    if (!res.ok) {
-      const body = await res.text().catch(() => '')
-      throw new Error(`Shopify REST ${res.status} — ${body}`)
-    }
-
-    return { json: await res.json(), link: res.headers.get('link') ?? '' }
-  }
-
-  throw new Error('Shopify REST: uventet tilstand')
-}
-
-async function fetchAllPages<T>(path: string, key: string, maxItems?: number, maxPages = 20): Promise<T[]> {
-  const items: T[] = []
-  let url: string | null = shopifyUrl(path)
-  let page = 1
-
-  while (url && page <= maxPages) {
-    const { json, link } = await restGet(url)
-    const batch = (json[key] as T[]) ?? []
-    items.push(...batch)
-
-    if (maxItems && items.length >= maxItems) break
-
-    const next = link.match(/<([^>]+)>;\s*rel="next"/)
-    url = next ? next[1] : null
-    page++
-  }
-
-  if (page > maxPages) {
-    console.error(`Shopify: stoppede ved side ${maxPages} for "${key}" — muligt loop`)
-  }
-
-  return maxItems ? items.slice(0, maxItems) : items
-}
-
-async function shopifyGraphQL<T>(
-  query: string,
-  variables?: Record<string, unknown>
-): Promise<T> {
-  const MAX_RETRIES = 4
-
-  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
-    const res = await fetch(shopifyUrl('/graphql.json'), {
-      method: 'POST',
-      headers: shopifyHeaders(),
-      body: JSON.stringify({ query, variables }),
-    })
-
-    if (res.status === 429) {
-      if (attempt < MAX_RETRIES) {
-        const retryAfter = parseInt(res.headers.get('retry-after') ?? '2', 10)
-        await sleep((isNaN(retryAfter) ? 2 : retryAfter) * 1000)
-        continue
-      }
-      throw new Error('Shopify GraphQL rate limit: too many attempts')
-    }
-
-    if (!res.ok) throw new Error(`Shopify GraphQL ${res.status}`)
-    const json = await res.json()
-    if (json.errors?.length) {
-      // GraphQL throttling returns 200 OK with a THROTTLED extension code.
-      // Wait based on the cost gap to currentlyAvailable, then retry.
-      const code = json.errors[0]?.extensions?.code as string | undefined
-      if (code === 'THROTTLED' && attempt < MAX_RETRIES) {
-        const cost = json.extensions?.cost as
-          | { requestedQueryCost?: number; throttleStatus?: { currentlyAvailable?: number; restoreRate?: number } }
-          | undefined
-        const requested = cost?.requestedQueryCost ?? 1000
-        const available = cost?.throttleStatus?.currentlyAvailable ?? 0
-        const restoreRate = cost?.throttleStatus?.restoreRate ?? 100
-        const waitMs = Math.max(500, Math.ceil(((requested - available) / restoreRate) * 1000))
-        await sleep(waitMs)
-        continue
-      }
-      throw new Error(json.errors[0].message)
-    }
-    return json.data as T
-  }
-
-  throw new Error('Shopify GraphQL: uventet tilstand')
-}
-
-async function inBatches<T, R>(
-  items: T[],
-  batchSize: number,
-  fn: (item: T) => Promise<R>
-): Promise<R[]> {
-  const results: R[] = []
-  const total = items.length
-  for (let i = 0; i < total; i += batchSize) {
-    const batchEnd = Math.min(i + batchSize, total)
-    results.push(...(await Promise.all(items.slice(i, batchEnd).map(fn))))
-  }
-  return results
+function parseGid(gid: string): number {
+  const match = gid.match(/\/(\d+)$/)
+  return match ? parseInt(match[1], 10) : 0
 }
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -255,8 +137,6 @@ export type ShopifyMarket = {
   countryCodes: string[]
 }
 
-// ─── Main fetch ───────────────────────────────────────────────────────────────
-
 // Shopifys maksimale page-size for REST products.json. fetchAllPages
 // paginerer via Link-header indtil der ikke er flere sider — ingen øvre
 // grænse på totalen.
@@ -287,70 +167,6 @@ type ProductMetafieldsResponse = {
   } | null>
 }
 
-async function fetchProductMetafieldsBulk(
-  productIds: number[]
-): Promise<Map<number, ShopifyMetafield[]>> {
-  const map = new Map<number, ShopifyMetafield[]>()
-  if (productIds.length === 0) return map
-
-  const BATCH_SIZE = 15
-  const FIRST_METAFIELDS = 50
-  const gids = productIds.map((id) => `gid://shopify/Product/${id}`)
-
-  for (let i = 0; i < gids.length; i += BATCH_SIZE) {
-    const batch = gids.slice(i, i + BATCH_SIZE)
-    try {
-      const data = await shopifyGraphQL<ProductMetafieldsResponse>(
-        `query ProductMetafields($ids: [ID!]!) {
-          nodes(ids: $ids) {
-            ... on Product {
-              id
-              metafields(first: ${FIRST_METAFIELDS}) {
-                nodes {
-                  id
-                  namespace
-                  key
-                  value
-                  type
-                  description
-                  createdAt
-                  updatedAt
-                }
-              }
-            }
-          }
-        }`,
-        { ids: batch }
-      )
-
-      for (const node of data.nodes) {
-        if (!node) continue
-        const productId = parseGid(node.id)
-        if (!productId) continue
-        const list: ShopifyMetafield[] = node.metafields.nodes.map((mf) => ({
-          id: parseGid(mf.id),
-          namespace: mf.namespace,
-          key: mf.key,
-          value: mf.value,
-          type: mf.type,
-          description: mf.description,
-          owner_id: productId,
-          created_at: mf.createdAt,
-          updated_at: mf.updatedAt,
-          owner_resource: 'product',
-        }))
-        map.set(productId, list)
-      }
-    } catch (err) {
-      console.error(
-        `Shopify: metafield-batch ${Math.floor(i / BATCH_SIZE) + 1} fejlede — ${err}`
-      )
-    }
-  }
-
-  return map
-}
-
 // Bulk-fetch collection memberships per product via GraphQL. Same cost
 // shape as fetchProductMetafieldsBulk (15 products × first:50 ≈ 780 cost
 // per call). Returns title strings — that's what the rest of the pipeline
@@ -362,91 +178,6 @@ type ProductCollectionsResponse = {
     collections: { nodes: Array<{ title: string }> }
   } | null>
 }
-
-async function fetchProductCollectionsBulk(
-  productIds: number[]
-): Promise<Map<number, string[]>> {
-  const map = new Map<number, string[]>()
-  if (productIds.length === 0) return map
-
-  const BATCH_SIZE = 15
-  const FIRST_COLLECTIONS = 50
-  const gids = productIds.map((id) => `gid://shopify/Product/${id}`)
-
-  for (let i = 0; i < gids.length; i += BATCH_SIZE) {
-    const batch = gids.slice(i, i + BATCH_SIZE)
-    try {
-      const data = await shopifyGraphQL<ProductCollectionsResponse>(
-        `query ProductCollections($ids: [ID!]!) {
-          nodes(ids: $ids) {
-            ... on Product {
-              id
-              collections(first: ${FIRST_COLLECTIONS}) {
-                nodes {
-                  title
-                }
-              }
-            }
-          }
-        }`,
-        { ids: batch }
-      )
-
-      for (const node of data.nodes) {
-        if (!node) continue
-        const productId = parseGid(node.id)
-        if (!productId) continue
-        map.set(
-          productId,
-          node.collections.nodes.map((c) => c.title).filter(Boolean)
-        )
-      }
-    } catch (err) {
-      console.error(
-        `Shopify: collections-batch ${Math.floor(i / BATCH_SIZE) + 1} fejlede — ${err}`
-      )
-    }
-  }
-
-  return map
-}
-
-export async function fetchProductsWithAllData(): Promise<ShopifyData> {
-  const t0 = Date.now()
-
-  const products = await fetchAllPages<ShopifyProduct>(
-    `/products.json?limit=${PRODUCT_LIMIT}&status=active`,
-    'products'
-  )
-  const tProducts = Date.now()
-  console.log(`[shopify] products list (${products.length}): ${tProducts - t0}ms`)
-
-  const productIds = products.map((p) => p.id)
-  // Metafields and collections are independent enrichment passes — run in
-  // parallel. Each is a sequential series of throttle-aware GraphQL calls;
-  // shopifyGraphQL handles the bucket back-off if both series compete for it.
-  const [productMetafieldsMap, productCollectionsMap] = await Promise.all([
-    fetchProductMetafieldsBulk(productIds),
-    fetchProductCollectionsBulk(productIds),
-  ])
-  const tEnrich = Date.now()
-  const totalMfs = [...productMetafieldsMap.values()].reduce((s, l) => s + l.length, 0)
-  const totalCols = [...productCollectionsMap.values()].reduce((s, l) => s + l.length, 0)
-  console.log(
-    `[shopify] enrichment parallel — metafields=${totalMfs}, collections=${totalCols}: ${tEnrich - tProducts}ms`
-  )
-
-  const enrichedProducts: ShopifyProduct[] = products.map((p) => ({
-    ...p,
-    metafields: productMetafieldsMap.get(p.id) ?? [],
-    collections: productCollectionsMap.get(p.id) ?? [],
-  }))
-
-  console.log(`[shopify] fetchProductsWithAllData total: ${Date.now() - t0}ms`)
-  return { products: enrichedProducts }
-}
-
-// ── Shopify Markets ────────────────────────────────────────────────────────────
 
 type ShopLocaleGql = { locale: string; name: string; primary: boolean }
 
@@ -487,151 +218,7 @@ const MARKETS_QUERY = `{
   }
 }`
 
-export async function fetchMarkets(): Promise<ShopifyMarket[]> {
-  const url = shopifyUrl('/graphql.json')
-
-  let res: Response
-  try {
-    res = await fetch(url, {
-      method: 'POST',
-      headers: shopifyHeaders(),
-      body: JSON.stringify({ query: MARKETS_QUERY }),
-    })
-  } catch (err) {
-    console.error(`Shopify fetchMarkets: netværksfejl — ${err}`)
-    return []
-  }
-
-  const rawText = await res.text()
-
-  if (!res.ok) {
-    console.error(`Shopify fetchMarkets: HTTP ${res.status} ${res.statusText} — ${rawText.slice(0, 500)}`)
-    return []
-  }
-
-  let json: {
-    data?: { markets?: { nodes?: unknown[]; userErrors?: unknown[] }; userErrors?: unknown[] }
-    errors?: Array<{ message?: string; extensions?: unknown }>
-    extensions?: unknown
-  }
-  try {
-    json = JSON.parse(rawText)
-  } catch (err) {
-    console.error(`Shopify fetchMarkets: kunne ikke parse JSON — ${err}`)
-    return []
-  }
-
-  if (json.errors?.length) {
-    console.error(`Shopify fetchMarkets: GraphQL errors — ${JSON.stringify(json.errors)}`)
-  }
-  if (json.data?.markets?.userErrors?.length) {
-    console.error(`Shopify fetchMarkets: markets.userErrors — ${JSON.stringify(json.data.markets.userErrors)}`)
-  }
-  if (json.data?.userErrors?.length) {
-    console.error(`Shopify fetchMarkets: data.userErrors — ${JSON.stringify(json.data.userErrors)}`)
-  }
-
-  const nodes = json.data?.markets?.nodes
-  if (!Array.isArray(nodes)) {
-    console.error(`Shopify fetchMarkets: markets.nodes mangler/ikke array`)
-    return []
-  }
-
-  type RawRootUrl = { locale: string; url: string }
-  type RawRegion = { code?: string }
-  type RawMarket = {
-    id: string
-    name: string
-    handle: string
-    status: string
-    type: string
-    currencySettings: { baseCurrency: { currencyCode: string; currencyName: string } }
-    webPresences: {
-      nodes: Array<{
-        rootUrls: RawRootUrl[]
-        defaultLocale: ShopLocaleGql
-        alternateLocales: ShopLocaleGql[]
-      }>
-    }
-    regions: { nodes: RawRegion[] }
-  }
-
-  return (nodes as RawMarket[]).map((m) => {
-    const presence = m.webPresences?.nodes?.[0]
-    const rootUrls = presence?.rootUrls ?? []
-    // Pick the URL matching the web-presence's default locale; fall back to the
-    // first available rootUrl so single-locale presences still work.
-    const defaultLocaleCode = presence?.defaultLocale?.locale
-    const matchedRootUrl =
-      rootUrls.find((r) => r.locale === defaultLocaleCode)?.url ?? rootUrls[0]?.url ?? null
-    // Extract ISO country codes from MarketRegionCountry nodes — non-country
-    // region types (e.g. "rest of world") return as empty objects and are
-    // filtered out by the truthy check on `code`.
-    const countryCodes = (m.regions?.nodes ?? [])
-      .map((r) => r.code)
-      .filter((c): c is string => typeof c === 'string' && c.length > 0)
-    return {
-      id: m.id,
-      name: m.name,
-      handle: m.handle,
-      status: (m.status === 'ACTIVE' ? 'ACTIVE' : 'DRAFT') as 'ACTIVE' | 'DRAFT',
-      type: m.type,
-      currency: m.currencySettings.baseCurrency.currencyCode,
-      currencyName: m.currencySettings.baseCurrency.currencyName,
-      defaultLocale: presence?.defaultLocale ?? null,
-      alternateLocales: presence?.alternateLocales ?? [],
-      marketUrl: matchedRootUrl,
-      countryCodes,
-    }
-  })
-}
-
-// Probe to verify the access token works and to read which scopes have been granted.
-// Also introspects Market + MarketWebPresence so we can see the actual schema for
-// the API version Shopify is serving (relevant when our requested version is
-// auto-upgraded). Returns the raw JSON so the caller can log/inspect.
-export async function probeShopifyAccess(): Promise<{
-  httpStatus: number
-  grantedScopesHeader: string | null
-  apiVersionHeader: string | null
-  rawBody: string
-}> {
-  const url = shopifyUrl('/graphql.json')
-  const query = `{
-    shop { name myshopifyDomain }
-    currentAppInstallation { accessScopes { handle } }
-    Market: __type(name: "Market") {
-      name
-      fields { name type { name kind ofType { name kind } } }
-    }
-    MarketWebPresence: __type(name: "MarketWebPresence") {
-      name
-      fields { name type { name kind ofType { name kind } } }
-    }
-  }`
-
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: shopifyHeaders(),
-    body: JSON.stringify({ query }),
-  })
-  const body = await res.text()
-  return {
-    httpStatus: res.status,
-    grantedScopesHeader: res.headers.get('x-shopify-api-granted-access-scopes'),
-    apiVersionHeader: res.headers.get('x-shopify-api-version'),
-    rawBody: body,
-  }
-}
-
-// ── Localized product fetch ────────────────────────────────────────────────────
-
-function parseGid(gid: string): number {
-  const match = gid.match(/\/(\d+)$/)
-  return match ? parseInt(match[1], 10) : 0
-}
-
-// ── Response types ─────────────────────────────────────────────────────────────
+// ── Response types (localized fetch) ───────────────────────────────────────────
 
 type NodeTranslationsResponse = {
   nodes: Array<{
@@ -656,175 +243,609 @@ type MarketVariantPrice = {
   compare_at_price: string | null
 }
 
-// Fetch translations for a specific list of product IDs using the nodes query.
-// This avoids the mismatch between translatableResources cursor order and REST product order.
-async function fetchProductTranslations(
-  locale: string,
-  productIds: number[]
-): Promise<Map<string, Record<string, string>>> {
-  const map = new Map<string, Record<string, string>>()
-  if (productIds.length === 0) return map
+// ─── Client factory ─────────────────────────────────────────────────────────
+//
+// Credentials are passed in (shopUrl + accessToken) instead of read from env,
+// so each project can have its own Shopify connection. Build one client per
+// request from the relevant project's decrypted credentials (see
+// lib/projectShopify.ts). The factory preserves all prior behaviour:
+// rate-limiting (REST 429/retry-after, GraphQL THROTTLED cost-based back-off,
+// up to 4 retries), pagination safety (stop at 20 pages), batch enrichment
+// (15 products at a time, in parallel), read-only (no mutations), and the
+// hardcoded API version 2025-07.
 
-  const gids = productIds.map((id) => `gid://shopify/Product/${id}`)
-
-  for (let i = 0; i < gids.length; i += 250) {
-    const batch = gids.slice(i, i + 250)
-    try {
-      const data = await shopifyGraphQL<NodeTranslationsResponse>(
-        `query GetTranslations($ids: [ID!]!, $locale: String!) {
-          nodes(ids: $ids) {
-            ... on Product {
-              id
-              translations(locale: $locale) { key value outdated }
-            }
-          }
-        }`,
-        { ids: batch, locale }
-      )
-
-      for (const node of data.nodes) {
-        if (!node) continue
-        const productId = parseGid(node.id)
-        if (!productId) continue
-        const trans: Record<string, string> = {}
-        for (const t of node.translations) {
-          if (!t.outdated && t.value) trans[t.key] = t.value
-        }
-        if (Object.keys(trans).length > 0) map.set(String(productId), trans)
-      }
-    } catch (err) {
-      console.error(`Shopify: oversættelsesbatch ${Math.floor(i / 250) + 1} fejlede — ${err}`)
-    }
-  }
-
-  return map
+export type ShopifyCredentials = {
+  shopUrl: string
+  accessToken: string
 }
 
-// Fetch market-specific prices via Admin GraphQL `contextualPricing` on
-// ProductVariant. The context is keyed by ISO country code (CountryCode enum) —
-// not by Market GID, which is not a valid ContextualPricingContext field.
-// Shopify resolves the country to its corresponding market and returns the
-// converted price + currency for stores using automatic currency conversion.
-// `country` is forwarded as a typed GraphQL variable so it works dynamically
-// for any store / any market (DE, FR, DK, SE, …).
-async function fetchMarketPrices(
-  products: ShopifyProduct[],
-  country: string
-): Promise<Map<string, Map<number, MarketVariantPrice>>> {
-  const productMap = new Map<string, Map<number, MarketVariantPrice>>()
-  if (products.length === 0) return productMap
+export type ShopifyClient = {
+  fetchProductsWithAllData: () => Promise<ShopifyData>
+  fetchProductsLocalized: (
+    locale: string,
+    currency?: string,
+    country?: string
+  ) => Promise<ShopifyData>
+  fetchMarkets: () => Promise<ShopifyMarket[]>
+  probeShopifyAccess: () => Promise<{
+    httpStatus: number
+    grantedScopesHeader: string | null
+    apiVersionHeader: string | null
+    rawBody: string
+  }>
+}
 
-  // Build flat list of variant GIDs and a reverse lookup variantId → productId
-  // so we can rebuild the per-product structure from the flat node response.
-  const variantToProduct = new Map<number, number>()
-  const variantGids: string[] = []
-  for (const p of products) {
-    for (const v of p.variants) {
-      variantToProduct.set(v.id, p.id)
-      variantGids.push(`gid://shopify/ProductVariant/${v.id}`)
+export function createShopifyClient({ shopUrl, accessToken }: ShopifyCredentials): ShopifyClient {
+  function shopifyUrl(path: string): string {
+    return `https://${shopUrl}/admin/api/${API_VERSION}${path}`
+  }
+
+  function shopifyHeaders(): Record<string, string> {
+    return {
+      'X-Shopify-Access-Token': accessToken,
+      'Content-Type': 'application/json',
     }
   }
 
-  for (let i = 0; i < variantGids.length; i += 250) {
-    const batch = variantGids.slice(i, i + 250)
-    try {
-      const data = await shopifyGraphQL<NodeVariantPricesResponse>(
-        `query GetVariantPrices($ids: [ID!]!, $country: CountryCode!) {
-          nodes(ids: $ids) {
-            ... on ProductVariant {
-              id
-              contextualPricing(context: { country: $country }) {
-                price { amount currencyCode }
-                compareAtPrice { amount currencyCode }
+  async function restGet(url: string): Promise<{ json: Record<string, unknown>; link: string }> {
+    const MAX_RETRIES = 4
+
+    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+      const res = await fetch(url, { headers: shopifyHeaders() })
+
+      if (res.status === 429) {
+        if (attempt < MAX_RETRIES) {
+          const retryAfter = parseInt(res.headers.get('retry-after') ?? '2', 10)
+          const waitSec = isNaN(retryAfter) ? 2 : retryAfter
+          await sleep(waitSec * 1000)
+          continue
+        }
+        throw new Error('Shopify rate limit: too many attempts')
+      }
+
+      if (!res.ok) {
+        const body = await res.text().catch(() => '')
+        throw new Error(`Shopify REST ${res.status} — ${body}`)
+      }
+
+      return { json: await res.json(), link: res.headers.get('link') ?? '' }
+    }
+
+    throw new Error('Shopify REST: uventet tilstand')
+  }
+
+  async function fetchAllPages<T>(path: string, key: string, maxItems?: number, maxPages = 20): Promise<T[]> {
+    const items: T[] = []
+    let url: string | null = shopifyUrl(path)
+    let page = 1
+
+    while (url && page <= maxPages) {
+      const { json, link } = await restGet(url)
+      const batch = (json[key] as T[]) ?? []
+      items.push(...batch)
+
+      if (maxItems && items.length >= maxItems) break
+
+      const next = link.match(/<([^>]+)>;\s*rel="next"/)
+      url = next ? next[1] : null
+      page++
+    }
+
+    if (page > maxPages) {
+      console.error(`Shopify: stoppede ved side ${maxPages} for "${key}" — muligt loop`)
+    }
+
+    return maxItems ? items.slice(0, maxItems) : items
+  }
+
+  async function shopifyGraphQL<T>(
+    query: string,
+    variables?: Record<string, unknown>
+  ): Promise<T> {
+    const MAX_RETRIES = 4
+
+    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+      const res = await fetch(shopifyUrl('/graphql.json'), {
+        method: 'POST',
+        headers: shopifyHeaders(),
+        body: JSON.stringify({ query, variables }),
+      })
+
+      if (res.status === 429) {
+        if (attempt < MAX_RETRIES) {
+          const retryAfter = parseInt(res.headers.get('retry-after') ?? '2', 10)
+          await sleep((isNaN(retryAfter) ? 2 : retryAfter) * 1000)
+          continue
+        }
+        throw new Error('Shopify GraphQL rate limit: too many attempts')
+      }
+
+      if (!res.ok) throw new Error(`Shopify GraphQL ${res.status}`)
+      const json = await res.json()
+      if (json.errors?.length) {
+        // GraphQL throttling returns 200 OK with a THROTTLED extension code.
+        // Wait based on the cost gap to currentlyAvailable, then retry.
+        const code = json.errors[0]?.extensions?.code as string | undefined
+        if (code === 'THROTTLED' && attempt < MAX_RETRIES) {
+          const cost = json.extensions?.cost as
+            | { requestedQueryCost?: number; throttleStatus?: { currentlyAvailable?: number; restoreRate?: number } }
+            | undefined
+          const requested = cost?.requestedQueryCost ?? 1000
+          const available = cost?.throttleStatus?.currentlyAvailable ?? 0
+          const restoreRate = cost?.throttleStatus?.restoreRate ?? 100
+          const waitMs = Math.max(500, Math.ceil(((requested - available) / restoreRate) * 1000))
+          await sleep(waitMs)
+          continue
+        }
+        throw new Error(json.errors[0].message)
+      }
+      return json.data as T
+    }
+
+    throw new Error('Shopify GraphQL: uventet tilstand')
+  }
+
+  async function fetchProductMetafieldsBulk(
+    productIds: number[]
+  ): Promise<Map<number, ShopifyMetafield[]>> {
+    const map = new Map<number, ShopifyMetafield[]>()
+    if (productIds.length === 0) return map
+
+    const BATCH_SIZE = 15
+    const FIRST_METAFIELDS = 50
+    const gids = productIds.map((id) => `gid://shopify/Product/${id}`)
+
+    for (let i = 0; i < gids.length; i += BATCH_SIZE) {
+      const batch = gids.slice(i, i + BATCH_SIZE)
+      try {
+        const data = await shopifyGraphQL<ProductMetafieldsResponse>(
+          `query ProductMetafields($ids: [ID!]!) {
+            nodes(ids: $ids) {
+              ... on Product {
+                id
+                metafields(first: ${FIRST_METAFIELDS}) {
+                  nodes {
+                    id
+                    namespace
+                    key
+                    value
+                    type
+                    description
+                    createdAt
+                    updatedAt
+                  }
+                }
               }
             }
-          }
-        }`,
-        { ids: batch, country }
-      )
+          }`,
+          { ids: batch }
+        )
 
-      for (const node of data.nodes) {
-        if (!node) continue
-        const variantId = parseGid(node.id)
-        if (!variantId) continue
-        const productId = variantToProduct.get(variantId)
-        if (!productId) continue
-
-        let variantMap = productMap.get(String(productId))
-        if (!variantMap) {
-          variantMap = new Map<number, MarketVariantPrice>()
-          productMap.set(String(productId), variantMap)
+        for (const node of data.nodes) {
+          if (!node) continue
+          const productId = parseGid(node.id)
+          if (!productId) continue
+          const list: ShopifyMetafield[] = node.metafields.nodes.map((mf) => ({
+            id: parseGid(mf.id),
+            namespace: mf.namespace,
+            key: mf.key,
+            value: mf.value,
+            type: mf.type,
+            description: mf.description,
+            owner_id: productId,
+            created_at: mf.createdAt,
+            updated_at: mf.updatedAt,
+            owner_resource: 'product',
+          }))
+          map.set(productId, list)
         }
-        variantMap.set(variantId, {
-          price: node.contextualPricing.price.amount,
-          currency: node.contextualPricing.price.currencyCode,
-          compare_at_price: node.contextualPricing.compareAtPrice?.amount ?? null,
-        })
+      } catch (err) {
+        console.error(
+          `Shopify: metafield-batch ${Math.floor(i / BATCH_SIZE) + 1} fejlede — ${err}`
+        )
       }
+    }
+
+    return map
+  }
+
+  async function fetchProductCollectionsBulk(
+    productIds: number[]
+  ): Promise<Map<number, string[]>> {
+    const map = new Map<number, string[]>()
+    if (productIds.length === 0) return map
+
+    const BATCH_SIZE = 15
+    const FIRST_COLLECTIONS = 50
+    const gids = productIds.map((id) => `gid://shopify/Product/${id}`)
+
+    for (let i = 0; i < gids.length; i += BATCH_SIZE) {
+      const batch = gids.slice(i, i + BATCH_SIZE)
+      try {
+        const data = await shopifyGraphQL<ProductCollectionsResponse>(
+          `query ProductCollections($ids: [ID!]!) {
+            nodes(ids: $ids) {
+              ... on Product {
+                id
+                collections(first: ${FIRST_COLLECTIONS}) {
+                  nodes {
+                    title
+                  }
+                }
+              }
+            }
+          }`,
+          { ids: batch }
+        )
+
+        for (const node of data.nodes) {
+          if (!node) continue
+          const productId = parseGid(node.id)
+          if (!productId) continue
+          map.set(
+            productId,
+            node.collections.nodes.map((c) => c.title).filter(Boolean)
+          )
+        }
+      } catch (err) {
+        console.error(
+          `Shopify: collections-batch ${Math.floor(i / BATCH_SIZE) + 1} fejlede — ${err}`
+        )
+      }
+    }
+
+    return map
+  }
+
+  async function fetchProductsWithAllData(): Promise<ShopifyData> {
+    const t0 = Date.now()
+
+    const products = await fetchAllPages<ShopifyProduct>(
+      `/products.json?limit=${PRODUCT_LIMIT}&status=active`,
+      'products'
+    )
+    const tProducts = Date.now()
+    console.log(`[shopify] products list (${products.length}): ${tProducts - t0}ms`)
+
+    const productIds = products.map((p) => p.id)
+    // Metafields and collections are independent enrichment passes — run in
+    // parallel. Each is a sequential series of throttle-aware GraphQL calls;
+    // shopifyGraphQL handles the bucket back-off if both series compete for it.
+    const [productMetafieldsMap, productCollectionsMap] = await Promise.all([
+      fetchProductMetafieldsBulk(productIds),
+      fetchProductCollectionsBulk(productIds),
+    ])
+    const tEnrich = Date.now()
+    const totalMfs = [...productMetafieldsMap.values()].reduce((s, l) => s + l.length, 0)
+    const totalCols = [...productCollectionsMap.values()].reduce((s, l) => s + l.length, 0)
+    console.log(
+      `[shopify] enrichment parallel — metafields=${totalMfs}, collections=${totalCols}: ${tEnrich - tProducts}ms`
+    )
+
+    const enrichedProducts: ShopifyProduct[] = products.map((p) => ({
+      ...p,
+      metafields: productMetafieldsMap.get(p.id) ?? [],
+      collections: productCollectionsMap.get(p.id) ?? [],
+    }))
+
+    console.log(`[shopify] fetchProductsWithAllData total: ${Date.now() - t0}ms`)
+    return { products: enrichedProducts }
+  }
+
+  async function fetchMarkets(): Promise<ShopifyMarket[]> {
+    const url = shopifyUrl('/graphql.json')
+
+    let res: Response
+    try {
+      res = await fetch(url, {
+        method: 'POST',
+        headers: shopifyHeaders(),
+        body: JSON.stringify({ query: MARKETS_QUERY }),
+      })
     } catch (err) {
-      console.error(`Shopify: markedsprisbatch ${Math.floor(i / 250) + 1} fejlede — ${err}`)
+      console.error(`Shopify fetchMarkets: netværksfejl — ${err}`)
+      return []
+    }
+
+    const rawText = await res.text()
+
+    if (!res.ok) {
+      console.error(`Shopify fetchMarkets: HTTP ${res.status} ${res.statusText} — ${rawText.slice(0, 500)}`)
+      return []
+    }
+
+    let json: {
+      data?: { markets?: { nodes?: unknown[]; userErrors?: unknown[] }; userErrors?: unknown[] }
+      errors?: Array<{ message?: string; extensions?: unknown }>
+      extensions?: unknown
+    }
+    try {
+      json = JSON.parse(rawText)
+    } catch (err) {
+      console.error(`Shopify fetchMarkets: kunne ikke parse JSON — ${err}`)
+      return []
+    }
+
+    if (json.errors?.length) {
+      console.error(`Shopify fetchMarkets: GraphQL errors — ${JSON.stringify(json.errors)}`)
+    }
+    if (json.data?.markets?.userErrors?.length) {
+      console.error(`Shopify fetchMarkets: markets.userErrors — ${JSON.stringify(json.data.markets.userErrors)}`)
+    }
+    if (json.data?.userErrors?.length) {
+      console.error(`Shopify fetchMarkets: data.userErrors — ${JSON.stringify(json.data.userErrors)}`)
+    }
+
+    const nodes = json.data?.markets?.nodes
+    if (!Array.isArray(nodes)) {
+      console.error(`Shopify fetchMarkets: markets.nodes mangler/ikke array`)
+      return []
+    }
+
+    type RawRootUrl = { locale: string; url: string }
+    type RawRegion = { code?: string }
+    type RawMarket = {
+      id: string
+      name: string
+      handle: string
+      status: string
+      type: string
+      currencySettings: { baseCurrency: { currencyCode: string; currencyName: string } }
+      webPresences: {
+        nodes: Array<{
+          rootUrls: RawRootUrl[]
+          defaultLocale: ShopLocaleGql
+          alternateLocales: ShopLocaleGql[]
+        }>
+      }
+      regions: { nodes: RawRegion[] }
+    }
+
+    return (nodes as RawMarket[]).map((m) => {
+      const presence = m.webPresences?.nodes?.[0]
+      const rootUrls = presence?.rootUrls ?? []
+      // Pick the URL matching the web-presence's default locale; fall back to the
+      // first available rootUrl so single-locale presences still work.
+      const defaultLocaleCode = presence?.defaultLocale?.locale
+      const matchedRootUrl =
+        rootUrls.find((r) => r.locale === defaultLocaleCode)?.url ?? rootUrls[0]?.url ?? null
+      // Extract ISO country codes from MarketRegionCountry nodes — non-country
+      // region types (e.g. "rest of world") return as empty objects and are
+      // filtered out by the truthy check on `code`.
+      const countryCodes = (m.regions?.nodes ?? [])
+        .map((r) => r.code)
+        .filter((c): c is string => typeof c === 'string' && c.length > 0)
+      return {
+        id: m.id,
+        name: m.name,
+        handle: m.handle,
+        status: (m.status === 'ACTIVE' ? 'ACTIVE' : 'DRAFT') as 'ACTIVE' | 'DRAFT',
+        type: m.type,
+        currency: m.currencySettings.baseCurrency.currencyCode,
+        currencyName: m.currencySettings.baseCurrency.currencyName,
+        defaultLocale: presence?.defaultLocale ?? null,
+        alternateLocales: presence?.alternateLocales ?? [],
+        marketUrl: matchedRootUrl,
+        countryCodes,
+      }
+    })
+  }
+
+  // Probe to verify the access token works and to read which scopes have been granted.
+  // Also introspects Market + MarketWebPresence so we can see the actual schema for
+  // the API version Shopify is serving (relevant when our requested version is
+  // auto-upgraded). Returns the raw JSON so the caller can log/inspect.
+  async function probeShopifyAccess(): Promise<{
+    httpStatus: number
+    grantedScopesHeader: string | null
+    apiVersionHeader: string | null
+    rawBody: string
+  }> {
+    const url = shopifyUrl('/graphql.json')
+    const query = `{
+      shop { name myshopifyDomain }
+      currentAppInstallation { accessScopes { handle } }
+      Market: __type(name: "Market") {
+        name
+        fields { name type { name kind ofType { name kind } } }
+      }
+      MarketWebPresence: __type(name: "MarketWebPresence") {
+        name
+        fields { name type { name kind ofType { name kind } } }
+      }
+    }`
+
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: shopifyHeaders(),
+      body: JSON.stringify({ query }),
+    })
+    const body = await res.text()
+    return {
+      httpStatus: res.status,
+      grantedScopesHeader: res.headers.get('x-shopify-api-granted-access-scopes'),
+      apiVersionHeader: res.headers.get('x-shopify-api-version'),
+      rawBody: body,
     }
   }
 
-  return productMap
-}
+  // Fetch translations for a specific list of product IDs using the nodes query.
+  // This avoids the mismatch between translatableResources cursor order and REST product order.
+  async function fetchProductTranslations(
+    locale: string,
+    productIds: number[]
+  ): Promise<Map<string, Record<string, string>>> {
+    const map = new Map<string, Record<string, string>>()
+    if (productIds.length === 0) return map
 
-export async function fetchProductsLocalized(
-  locale: string,
-  currency?: string,
-  country?: string
-): Promise<ShopifyData> {
-  const t0 = Date.now()
+    const gids = productIds.map((id) => `gid://shopify/Product/${id}`)
 
-  const { products } = await fetchProductsWithAllData()
-  const tFetch = Date.now()
+    for (let i = 0; i < gids.length; i += 250) {
+      const batch = gids.slice(i, i + 250)
+      try {
+        const data = await shopifyGraphQL<NodeTranslationsResponse>(
+          `query GetTranslations($ids: [ID!]!, $locale: String!) {
+            nodes(ids: $ids) {
+              ... on Product {
+                id
+                translations(locale: $locale) { key value outdated }
+              }
+            }
+          }`,
+          { ids: batch, locale }
+        )
 
-  const productIds = products.map((p) => p.id)
-
-  // Translations and market prices both need data from the products fetch but
-  // are independent of each other — run in parallel.
-  const [translations, priceOverrides] = await Promise.all([
-    locale && locale !== 'en'
-      ? fetchProductTranslations(locale, productIds)
-      : Promise.resolve(new Map<string, Record<string, string>>()),
-    country
-      ? fetchMarketPrices(products, country)
-      : Promise.resolve(new Map<string, Map<number, MarketVariantPrice>>()),
-  ])
-  const tLocalize = Date.now()
-  console.log(
-    `[shopify] translations + market prices in parallel (locale=${locale}, country=${country ?? '-'}): ${tLocalize - tFetch}ms`
-  )
-
-  const finalProducts =
-    translations.size === 0 && priceOverrides.size === 0
-      ? products
-      : products.map((p) => {
-          const trans = translations.get(String(p.id))
-          const variantPrices = priceOverrides.get(String(p.id))
-
-          const updatedVariants = variantPrices
-            ? p.variants.map((v) => {
-                const prices = variantPrices.get(v.id)
-                return prices
-                  ? {
-                      ...v,
-                      price: prices.price,
-                      compare_at_price: prices.compare_at_price,
-                      currency: prices.currency,
-                    }
-                  : v
-              })
-            : p.variants
-
-          return {
-            ...p,
-            title: trans?.['title'] ?? p.title,
-            body_html: trans?.['body_html'] ?? p.body_html,
-            variants: updatedVariants,
+        for (const node of data.nodes) {
+          if (!node) continue
+          const productId = parseGid(node.id)
+          if (!productId) continue
+          const trans: Record<string, string> = {}
+          for (const t of node.translations) {
+            if (!t.outdated && t.value) trans[t.key] = t.value
           }
-        })
+          if (Object.keys(trans).length > 0) map.set(String(productId), trans)
+        }
+      } catch (err) {
+        console.error(`Shopify: oversættelsesbatch ${Math.floor(i / 250) + 1} fejlede — ${err}`)
+      }
+    }
 
-  console.log(`[shopify] fetchProductsLocalized total: ${Date.now() - t0}ms`)
-  return { products: finalProducts }
+    return map
+  }
+
+  // Fetch market-specific prices via Admin GraphQL `contextualPricing` on
+  // ProductVariant. The context is keyed by ISO country code (CountryCode enum) —
+  // not by Market GID, which is not a valid ContextualPricingContext field.
+  // Shopify resolves the country to its corresponding market and returns the
+  // converted price + currency for stores using automatic currency conversion.
+  // `country` is forwarded as a typed GraphQL variable so it works dynamically
+  // for any store / any market (DE, FR, DK, SE, …).
+  async function fetchMarketPrices(
+    products: ShopifyProduct[],
+    country: string
+  ): Promise<Map<string, Map<number, MarketVariantPrice>>> {
+    const productMap = new Map<string, Map<number, MarketVariantPrice>>()
+    if (products.length === 0) return productMap
+
+    // Build flat list of variant GIDs and a reverse lookup variantId → productId
+    // so we can rebuild the per-product structure from the flat node response.
+    const variantToProduct = new Map<number, number>()
+    const variantGids: string[] = []
+    for (const p of products) {
+      for (const v of p.variants) {
+        variantToProduct.set(v.id, p.id)
+        variantGids.push(`gid://shopify/ProductVariant/${v.id}`)
+      }
+    }
+
+    for (let i = 0; i < variantGids.length; i += 250) {
+      const batch = variantGids.slice(i, i + 250)
+      try {
+        const data = await shopifyGraphQL<NodeVariantPricesResponse>(
+          `query GetVariantPrices($ids: [ID!]!, $country: CountryCode!) {
+            nodes(ids: $ids) {
+              ... on ProductVariant {
+                id
+                contextualPricing(context: { country: $country }) {
+                  price { amount currencyCode }
+                  compareAtPrice { amount currencyCode }
+                }
+              }
+            }
+          }`,
+          { ids: batch, country }
+        )
+
+        for (const node of data.nodes) {
+          if (!node) continue
+          const variantId = parseGid(node.id)
+          if (!variantId) continue
+          const productId = variantToProduct.get(variantId)
+          if (!productId) continue
+
+          let variantMap = productMap.get(String(productId))
+          if (!variantMap) {
+            variantMap = new Map<number, MarketVariantPrice>()
+            productMap.set(String(productId), variantMap)
+          }
+          variantMap.set(variantId, {
+            price: node.contextualPricing.price.amount,
+            currency: node.contextualPricing.price.currencyCode,
+            compare_at_price: node.contextualPricing.compareAtPrice?.amount ?? null,
+          })
+        }
+      } catch (err) {
+        console.error(`Shopify: markedsprisbatch ${Math.floor(i / 250) + 1} fejlede — ${err}`)
+      }
+    }
+
+    return productMap
+  }
+
+  async function fetchProductsLocalized(
+    locale: string,
+    currency?: string,
+    country?: string
+  ): Promise<ShopifyData> {
+    const t0 = Date.now()
+
+    const { products } = await fetchProductsWithAllData()
+    const tFetch = Date.now()
+
+    const productIds = products.map((p) => p.id)
+
+    // Translations and market prices both need data from the products fetch but
+    // are independent of each other — run in parallel.
+    const [translations, priceOverrides] = await Promise.all([
+      locale && locale !== 'en'
+        ? fetchProductTranslations(locale, productIds)
+        : Promise.resolve(new Map<string, Record<string, string>>()),
+      country
+        ? fetchMarketPrices(products, country)
+        : Promise.resolve(new Map<string, Map<number, MarketVariantPrice>>()),
+    ])
+    const tLocalize = Date.now()
+    console.log(
+      `[shopify] translations + market prices in parallel (locale=${locale}, country=${country ?? '-'}): ${tLocalize - tFetch}ms`
+    )
+
+    const finalProducts =
+      translations.size === 0 && priceOverrides.size === 0
+        ? products
+        : products.map((p) => {
+            const trans = translations.get(String(p.id))
+            const variantPrices = priceOverrides.get(String(p.id))
+
+            const updatedVariants = variantPrices
+              ? p.variants.map((v) => {
+                  const prices = variantPrices.get(v.id)
+                  return prices
+                    ? {
+                        ...v,
+                        price: prices.price,
+                        compare_at_price: prices.compare_at_price,
+                        currency: prices.currency,
+                      }
+                    : v
+                })
+              : p.variants
+
+            return {
+              ...p,
+              title: trans?.['title'] ?? p.title,
+              body_html: trans?.['body_html'] ?? p.body_html,
+              variants: updatedVariants,
+            }
+          })
+
+    console.log(`[shopify] fetchProductsLocalized total: ${Date.now() - t0}ms`)
+    return { products: finalProducts }
+  }
+
+  return {
+    fetchProductsWithAllData,
+    fetchProductsLocalized,
+    fetchMarkets,
+    probeShopifyAccess,
+  }
 }

@@ -23,3 +23,23 @@ If a feature request appears to require writing to Shopify, refuse it, point to 
 
 This is enforced mechanically by `scripts/check-shopify-readonly.ts`, wired into `prebuild` so `npm run build` (and CI) fails on regressions.
 <!-- END:shopify-readonly-rule -->
+
+# Shopify credentials are per-project and encrypted
+
+Each `project` row owns its own Shopify connection: `shop_url` plus an
+AES-256-GCM-encrypted access token (`access_token_ciphertext` / `_iv` / `_tag`).
+Credentials are **never** read from env at runtime and **never** stored in
+plaintext.
+
+- Build a Shopify client only via `createShopifyClientForProject(db, projectId)`
+  (`lib/projectShopify.ts`), which decrypts the token with `TOKEN_ENCRYPTION_KEY`
+  (`lib/crypto.ts`) at call time. `lib/shopify.ts` is a credentials-agnostic
+  factory — do not make it read env.
+- Decryption is server-side only. The plaintext token must never be sent to the
+  client or logged. UI shows status + `shop_url` only; the token field is
+  write-only (`POST /api/projects/[projectId]/connect`).
+- Routes that talk to Shopify (`/api/shopify/markets`, `/api/shopify/products`,
+  sync) require a `projectId`/feed whose project has a stored token, and fail
+  with a clear error otherwise — there is no shared/global fallback.
+- `SHOPIFY_SHOP_URL` / `SHOPIFY_ACCESS_TOKEN` in env are only consumed by the
+  one-time backfill (`scripts/backfill-default-project.ts`), not by runtime.
