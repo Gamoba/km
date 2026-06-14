@@ -41,7 +41,7 @@ export type OptimizationScope = {
 // PostgREST caps at 1000 rows/request; page through active products. Mirrors
 // feedGenerator's fetchAllActiveProducts (kept local to avoid importing the
 // Anthropic-laden feedGenerator module just for a paged read).
-async function fetchAllActiveProducts(
+export async function fetchAllActiveProducts(
   db: ReturnType<typeof adminDb>,
   feedId: string
 ): Promise<SupabaseProduct[]> {

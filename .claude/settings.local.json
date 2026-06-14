@@ -29,7 +29,11 @@
       "PowerShell(npx eslint app/optimize/OptimizeSettingsClient.tsx \"app/feed/[feedId]/optimize/page.tsx\" 2>&1 | Select-Object -First 20; if \\($LASTEXITCODE -eq 0\\) { \"clean\" })",
       "PowerShell(npx tsc --noEmit -p tsconfig.json 2>&1 | Select-Object -First 25; npx eslint app/optimize/ \"app/feed/[feedId]/optimize/page.tsx\" 2>&1 | Select-Object -First 25; if \\($LASTEXITCODE -eq 0\\) { \"eslint: clean\" })",
       "PowerShell(npx tsc --noEmit -p tsconfig.json 2>&1 | Select-Object -First 30; npx eslint app/optimize/ app/components/FilterEditor.tsx app/filters/FiltersClient.tsx \"app/feed/[feedId]/optimize/page.tsx\" 2>&1 | Select-Object -First 30; if \\($LASTEXITCODE -eq 0\\) { \"eslint: clean\" })",
-      "PowerShell(npx tsc --noEmit -p tsconfig.json 2>&1 | Select-Object -First 20; npx eslint app/optimize/ app/components/FilterEditor.tsx app/filters/FiltersClient.tsx \"app/feed/[feedId]/optimize/page.tsx\" 2>&1 | Select-Object -First 20; if \\($LASTEXITCODE -eq 0\\) { \"eslint: clean\" })"
+      "PowerShell(npx tsc --noEmit -p tsconfig.json 2>&1 | Select-Object -First 20; npx eslint app/optimize/ app/components/FilterEditor.tsx app/filters/FiltersClient.tsx \"app/feed/[feedId]/optimize/page.tsx\" 2>&1 | Select-Object -First 20; if \\($LASTEXITCODE -eq 0\\) { \"eslint: clean\" })",
+      "PowerShell(npx tsc --noEmit -p tsconfig.json 2>&1 | Select-Object -First 30; npx eslint lib/optimizationBuckets.ts lib/titleOptimizationRun.ts lib/titleOptimizationScope.ts 2>&1 | Select-Object -First 30; if \\($LASTEXITCODE -eq 0\\) { \"eslint: clean\" })",
+      "PowerShell(npx tsc --noEmit -p tsconfig.json 2>&1 | Select-Object -First 30; npx eslint app/optimize/actions.ts 2>&1 | Select-Object -First 30; if \\($LASTEXITCODE -eq 0\\) { \"eslint: clean\" })",
+      "PowerShell(npx tsc --noEmit -p tsconfig.json 2>&1 | Select-Object -First 30; npx eslint app/optimize/BucketListPanel.tsx app/optimize/OptimizeClient.tsx \"app/feed/[feedId]/optimize/page.tsx\" \"app/feed/[feedId]/optimize/[bucketId]/page.tsx\" 2>&1 | Select-Object -First 30; if \\($LASTEXITCODE -eq 0\\) { \"eslint: clean\" })",
+      "PowerShell(npx tsc --noEmit -p tsconfig.json 2>&1 | Select-Object -First 30; npx eslint app/optimize/ \"app/feed/[feedId]/optimize/[bucketId]/page.tsx\" 2>&1 | Select-Object -First 40; if \\($LASTEXITCODE -eq 0\\) { \"eslint: clean\" })"
     ]
   }
 }

@@ -1,7 +1,8 @@
 import { redirect, notFound } from 'next/navigation'
 import { createSupabaseServerClient } from '@/lib/supabase-server'
 import { getOwnedFeed } from '@/lib/feeds'
-import { getOptimizationSettings, getOptimizationFilters } from '@/lib/titleOptimizationService'
+import { getOptimizationSettings } from '@/lib/titleOptimizationService'
+import { listBuckets } from '@/lib/optimizationBuckets'
 import { OptimizeClient } from '@/app/optimize/OptimizeClient'
 
 export default async function FeedOptimizePage({
@@ -20,9 +21,9 @@ export default async function FeedOptimizePage({
   const feed = await getOwnedFeed(user.id, feedId)
   if (!feed) notFound()
 
-  const [settings, filters] = await Promise.all([
+  const [settings, bucketList] = await Promise.all([
     getOptimizationSettings(feedId),
-    getOptimizationFilters(feedId),
+    listBuckets(feedId),
   ])
 
   return (
@@ -30,8 +31,7 @@ export default async function FeedOptimizePage({
       feedId={feedId}
       feedName={feed.name}
       initialSettings={settings}
-      initialInclude={filters.include}
-      initialExclude={filters.exclude}
+      initialBuckets={bucketList}
     />
   )
 }

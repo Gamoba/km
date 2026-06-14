@@ -149,10 +149,12 @@ export async function runTitleOptimization(
 
 // Maps an outcome to a product_title_optimizations row. status derives from
 // validation; optimized_title is null on failure (satisfies the invariant CHECK).
-function outcomeToRow(feedId: string, o: OptimizationOutcome) {
+// bucketId records which bucket produced the title (null for non-bucket runs).
+function outcomeToRow(feedId: string, o: OptimizationOutcome, bucketId: string | null) {
   const ok = o.validation.ok
   return {
     feed_id: feedId,
+    bucket_id: bucketId,
     product_ref: o.product_ref,
     status: ok ? 'ai_generated' : 'needs_review',
     original_title: o.original_title,
@@ -166,14 +168,15 @@ function outcomeToRow(feedId: string, o: OptimizationOutcome) {
 }
 
 // Upserts outcomes into product_title_optimizations (chunked). Shared by the
-// full run and the chunked per-refs run used by the UI.
+// full run and the chunked per-refs / per-bucket runs.
 export async function persistOutcomes(
   feedId: string,
-  outcomes: OptimizationOutcome[]
+  outcomes: OptimizationOutcome[],
+  bucketId: string | null = null
 ): Promise<void> {
   if (outcomes.length === 0) return
   const db = adminDb()
-  const rows = outcomes.map((o) => outcomeToRow(feedId, o))
+  const rows = outcomes.map((o) => outcomeToRow(feedId, o, bucketId))
   const CHUNK = 500
   for (let i = 0; i < rows.length; i += CHUNK) {
     const { error } = await db

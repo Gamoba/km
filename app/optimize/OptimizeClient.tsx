@@ -1,27 +1,25 @@
 'use client'
 
 import { useState } from 'react'
-import { RunPanel } from './RunPanel'
-import { ScopePanel } from './ScopePanel'
+import { BucketListPanel } from './BucketListPanel'
 import { SettingsPanel } from './SettingsPanel'
-import type { OptimizationSettings, OptFilterConfig } from '@/lib/titleOptimizationService'
+import type { OptimizationSettings } from '@/lib/titleOptimizationService'
+import type { BucketSummary } from '@/lib/optimizationBuckets'
 
-type Tab = 'run' | 'scope' | 'settings'
+type Tab = 'buckets' | 'settings'
 
 export function OptimizeClient({
   feedId,
   feedName,
   initialSettings,
-  initialInclude,
-  initialExclude,
+  initialBuckets,
 }: {
   feedId: string
   feedName: string
   initialSettings: OptimizationSettings
-  initialInclude: OptFilterConfig
-  initialExclude: OptFilterConfig
+  initialBuckets: BucketSummary[]
 }) {
-  const [tab, setTab] = useState<Tab>('run')
+  const [tab, setTab] = useState<Tab>('buckets')
 
   const tabBtn = (value: Tab, label: string) => {
     const isActive = tab === value
@@ -49,18 +47,14 @@ export function OptimizeClient({
         <div className="flex items-center gap-3">
           <h1 className="ff-topbar-title">{feedName} · AI Titles</h1>
           <div className="flex gap-1">
-            {tabBtn('run', 'Run')}
-            {tabBtn('scope', 'Scope')}
+            {tabBtn('buckets', 'Buckets')}
             {tabBtn('settings', 'Settings')}
           </div>
         </div>
       </header>
 
       <main className="px-4 py-4 max-w-4xl">
-        {tab === 'run' && <RunPanel feedId={feedId} />}
-        {tab === 'scope' && (
-          <ScopePanel feedId={feedId} initialInclude={initialInclude} initialExclude={initialExclude} />
-        )}
+        {tab === 'buckets' && <BucketListPanel feedId={feedId} initialBuckets={initialBuckets} />}
         {tab === 'settings' && <SettingsPanel feedId={feedId} initialSettings={initialSettings} />}
       </main>
     </div>
