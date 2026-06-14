@@ -1,6 +1,7 @@
 import { createClient } from '@supabase/supabase-js'
 import Anthropic from '@anthropic-ai/sdk'
 import type { SupabaseProduct } from '@/lib/sync'
+import { resolveField, applyFeedFilters, type FeedFilter } from '@/lib/feedFilters'
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -29,14 +30,6 @@ type FeedMapping = {
   google_field: string
   mapping_type: MappingType
   config: Config
-}
-
-type FeedFilterRule = { field: string; operator: string; value: string }
-
-type FeedFilter = {
-  filter_type: 'include' | 'exclude'
-  operator: 'AND' | 'OR'
-  rules: FeedFilterRule[]
 }
 
 type StoredVariant = {
@@ -73,59 +66,6 @@ function xmlEscape(str: string): string {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&apos;')
-}
-
-// Builds a product URL using the selected market's rootUrl when available.
-// `marketUrl` may be a subdomain (https://shop.fr) or a subfolder (https://shop.com/fr) —
-// in both cases we strip a trailing slash and append /products/<handle>.
-function buildProductUrl(handle: string | null | undefined, marketUrl: string | null): string {
-  if (!handle) return ''
-  if (marketUrl) {
-    return `${marketUrl.replace(/\/+$/, '')}/products/${handle}`
-  }
-  const domain = process.env.SHOP_DOMAIN ?? process.env.SHOPIFY_SHOP_URL ?? ''
-  return domain ? `https://${domain}/products/${handle}` : ''
-}
-
-function resolveField(field: string, product: SupabaseProduct, marketUrl: string | null): string {
-  if (!field) return ''
-
-  if (field === 'url') {
-    return buildProductUrl(product.handle, marketUrl)
-  }
-
-  // item_group_id is the source-field name shown in the dropdown for the
-  // product's Shopify ID. shopify_id is kept as a back-compat alias for
-  // mappings saved before the rename.
-  if (field === 'item_group_id' || field === 'shopify_id') {
-    return product.shopify_id ? String(product.shopify_id) : ''
-  }
-
-  if (field.startsWith('metafield:')) {
-    const rest = field.slice('metafield:'.length)
-    const dot = rest.indexOf('.')
-    if (dot === -1) return ''
-    const namespace = rest.slice(0, dot)
-    const key = rest.slice(dot + 1)
-    return product.metafields.find((m) => m.namespace === namespace && m.key === key)?.value ?? ''
-  }
-
-  const variantMatch = field.match(/^variants\[(\d+)\]\.(.+)$/)
-  if (variantMatch) {
-    const variants = product.variants as Record<string, unknown>[]
-    return String(variants?.[+variantMatch[1]]?.[variantMatch[2]] ?? '')
-  }
-
-  const imageMatch = field.match(/^images\[(\d+)\]\.(.+)$/)
-  if (imageMatch) {
-    const images = product.images as Record<string, unknown>[]
-    return String(images?.[+imageMatch[1]]?.[imageMatch[2]] ?? '')
-  }
-
-  const val = (product as Record<string, unknown>)[field]
-  if (val === null || val === undefined) return ''
-  if (typeof val === 'object') return JSON.stringify(val)
-  return String(val)
 }
 
 function stripHtml(html: string): string {
@@ -275,66 +215,6 @@ async function resolvedValue(
   return value
 }
 
-function evalFilterRule(rule: FeedFilterRule, product: SupabaseProduct, marketUrl: string | null): boolean {
-  if (rule.field === 'collections') {
-    const cols = (product.collections as string[] | null | undefined) ?? []
-    switch (rule.operator) {
-      case 'contains':
-      case 'equals': return cols.includes(rule.value)
-      case 'does_not_contain':
-      case 'not_equals': return !cols.includes(rule.value)
-      case 'is_empty': return cols.length === 0
-      case 'is_not_empty': return cols.length > 0
-      default: return true
-    }
-  }
-  const v = resolveField(rule.field, product, marketUrl)
-  switch (rule.operator) {
-    case 'contains': return v.includes(rule.value)
-    case 'does_not_contain': return !v.includes(rule.value)
-    case 'equals': return v === rule.value
-    case 'not_equals': return v !== rule.value
-    case 'starts_with': return v.startsWith(rule.value)
-    case 'ends_with': return v.endsWith(rule.value)
-    case 'is_empty': return !v
-    case 'is_not_empty': return !!v
-    case 'greater_than': return parseFloat(v) > parseFloat(rule.value)
-    case 'less_than': return parseFloat(v) < parseFloat(rule.value)
-    default: return true
-  }
-}
-
-const NO_VALUE_OPS = new Set(['is_empty', 'is_not_empty'])
-
-function matchesFilter(product: SupabaseProduct, filter: FeedFilter, marketUrl: string | null): boolean {
-  const { operator } = filter
-  const activeRules = filter.rules.filter((r) => NO_VALUE_OPS.has(r.operator) || r.value !== '')
-  if (!activeRules.length) return true
-  let result = evalFilterRule(activeRules[0], product, marketUrl)
-  for (let i = 1; i < activeRules.length; i++) {
-    const val = evalFilterRule(activeRules[i], product, marketUrl)
-    result = operator === 'OR' ? result || val : result && val
-  }
-  return result
-}
-
-function applyFeedFilters(
-  products: SupabaseProduct[],
-  filters: FeedFilter[],
-  marketUrl: string | null
-): SupabaseProduct[] {
-  const includeFilter = filters.find((f) => f.filter_type === 'include')
-  const excludeFilter = filters.find((f) => f.filter_type === 'exclude')
-  let result = products
-  if (includeFilter && includeFilter.rules.length > 0) {
-    result = result.filter((p) => matchesFilter(p, includeFilter, marketUrl))
-  }
-  if (excludeFilter && excludeFilter.rules.some((r) => NO_VALUE_OPS.has(r.operator) || r.value !== '')) {
-    result = result.filter((p) => !matchesFilter(p, excludeFilter, marketUrl))
-  }
-  return result
-}
-
 function xmlLine(field: string, value: string): string {
   // User-defined custom fields (saved as "custom:foo") are written without
   // the g: namespace — they're not part of the Google Shopping spec, so the
@@ -395,7 +275,11 @@ async function fetchAllActiveProducts(
       .select('*, metafields:product_metafields(*)')
       .eq('feed_id', feedId)
       .eq('status', 'active')
+      // created_at alone is NOT stable across pages — bulk imports share a
+      // timestamp, so offset pagination over the ties duplicates/skips rows at
+      // page boundaries (duplicate <item>s in the feed). id is the tiebreaker.
       .order('created_at', { ascending: true })
+      .order('id', { ascending: true })
       .range(from, from + PAGE_SIZE - 1)
     if (error) throw new Error(`Products failed: ${error.message}`)
     if (!data || data.length === 0) break
@@ -404,6 +288,56 @@ async function fetchAllActiveProducts(
     from += PAGE_SIZE
   }
   return out
+}
+
+// True if any mapping draws on the AI-optimized title source (as a FIELD, a
+// COMBINE block value, a PREFIX_SUFFIX field, an onlyIf condition, etc.).
+// JSON-scanning the config catches every shape without enumerating them.
+function mappingsUseAiTitle(mappings: FeedMapping[]): boolean {
+  return mappings.some((m) => JSON.stringify(m.config).includes('ai_optimized_title'))
+}
+
+// Loads product_ref → optimized_title for the feed (only rows that have an
+// accepted title: ai_generated / human_edited; needs_review has none). Paged
+// with a stable order so large feeds don't drop rows at page boundaries.
+async function fetchOptimizedTitles(
+  db: ReturnType<typeof adminClient>,
+  feedId: string
+): Promise<Map<string, string>> {
+  const PAGE_SIZE = 1000
+  const map = new Map<string, string>()
+  let from = 0
+  while (true) {
+    const { data, error } = await db
+      .from('product_title_optimizations')
+      .select('product_ref, optimized_title')
+      .eq('feed_id', feedId)
+      .not('optimized_title', 'is', null)
+      .order('product_ref', { ascending: true })
+      .range(from, from + PAGE_SIZE - 1)
+    if (error) throw new Error(`Optimized titles failed: ${error.message}`)
+    if (!data || data.length === 0) break
+    for (const r of data as { product_ref: string; optimized_title: string }[]) {
+      map.set(r.product_ref, r.optimized_title)
+    }
+    if (data.length < PAGE_SIZE) break
+    from += PAGE_SIZE
+  }
+  return map
+}
+
+// Attaches optimized_title onto each product so resolveField('ai_optimized_title')
+// can read it. Only called when a mapping actually uses the AI title source.
+async function attachOptimizedTitles(
+  db: ReturnType<typeof adminClient>,
+  feedId: string,
+  products: SupabaseProduct[]
+): Promise<void> {
+  const map = await fetchOptimizedTitles(db, feedId)
+  for (const p of products) {
+    const opt = map.get(p.shopify_id)
+    if (opt) (p as Record<string, unknown>).optimized_title = opt
+  }
 }
 
 export async function generateFeed(feedId: string): Promise<FeedResult> {
@@ -433,6 +367,10 @@ export async function generateFeed(feedId: string): Promise<FeedResult> {
   )
 
   const filterRows = (filtersData ?? []) as FeedFilter[]
+
+  // If any mapping uses the AI-optimized title source, hydrate optimized_title
+  // onto the products before resolving fields.
+  if (mappingsUseAiTitle(mappings)) await attachOptimizedTitles(db, feedId, rawProducts)
 
   const products = applyFeedFilters(rawProducts, filterRows, marketUrl)
 
@@ -560,7 +498,7 @@ export async function generatePreview(feedId: string, limit = 100): Promise<Prev
     db.from('feed_settings').select('feed_mode').eq('feed_id', feedId).maybeSingle(),
     db.from('shop_settings').select('market_url, selected_market_id, selected_locale').eq('feed_id', feedId).maybeSingle(),
     db.from('feed_mappings').select('google_field, mapping_type, config').eq('feed_id', feedId),
-    db.from('products').select('*, metafields:product_metafields(*)').eq('feed_id', feedId).eq('status', 'active').order('created_at', { ascending: true }),
+    db.from('products').select('*, metafields:product_metafields(*)').eq('feed_id', feedId).eq('status', 'active').order('created_at', { ascending: true }).order('id', { ascending: true }),
     db.from('feed_filters').select('filter_type, operator, rules').eq('feed_id', feedId),
   ])
 
@@ -571,6 +509,8 @@ export async function generatePreview(feedId: string, limit = 100): Promise<Prev
   )
   const rawProducts = (productsData ?? []) as SupabaseProduct[]
   const filterRows = (filtersData ?? []) as FeedFilter[]
+
+  if (mappingsUseAiTitle(mappings)) await attachOptimizedTitles(db, feedId, rawProducts)
   const filteredProducts = applyFeedFilters(rawProducts, filterRows, marketUrl)
 
   let googleFields: string[]

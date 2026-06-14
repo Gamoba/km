@@ -497,6 +497,130 @@ export function createShopifyClient({ shopUrl, accessToken }: ShopifyCredentials
     return map
   }
 
+  // Parse a list.metaobject_reference value (a JSON array of GIDs) into a GID
+  // array. Returns [] if the value isn't a parseable array of Metaobject GIDs.
+  function parseGidList(value: string): string[] {
+    try {
+      const arr = JSON.parse(value)
+      if (!Array.isArray(arr)) return []
+      return arr.filter(
+        (g): g is string => typeof g === 'string' && g.startsWith('gid://shopify/Metaobject/')
+      )
+    } catch {
+      return []
+    }
+  }
+
+  // Picks the human-readable value of a resolved Metaobject node. displayName
+  // is Shopify's built-in human label and is preferred; otherwise fall back to
+  // a conventionally-named field (EN/DA), then the first non-empty field.
+  function pickMetaobjectValue(node: {
+    displayName: string | null
+    fields: Array<{ key: string; value: string | null }>
+  }): string | null {
+    if (node.displayName && node.displayName.trim()) return node.displayName.trim()
+    const preferred = ['name', 'label', 'title', 'value', 'navn']
+    for (const key of preferred) {
+      const f = node.fields.find((x) => x.key.toLowerCase() === key && x.value && x.value.trim())
+      if (f?.value) return f.value.trim()
+    }
+    const first = node.fields.find((x) => x.value && x.value.trim())
+    return first?.value?.trim() ?? null
+  }
+
+  // Resolves metaobject_reference / list.metaobject_reference metafield values
+  // from opaque GIDs (gid://shopify/Metaobject/...) to their real display
+  // values ("Pomerol", "Merlot"), in place. Each unique GID is fetched once and
+  // cached, since many products share the same region/grape/country. READ-ONLY:
+  // a single GraphQL `query`, no mutations. Unresolvable GIDs are left as-is so
+  // no data is silently dropped.
+  async function resolveMetaobjectReferences(products: ShopifyProduct[]): Promise<void> {
+    const REF = 'metaobject_reference'
+    const LIST_REF = 'list.metaobject_reference'
+
+    // 1. Collect unique GIDs across all products.
+    const gidSet = new Set<string>()
+    for (const p of products) {
+      for (const mf of p.metafields) {
+        if (mf.type === REF && mf.value?.startsWith('gid://shopify/Metaobject/')) {
+          gidSet.add(mf.value)
+        } else if (mf.type === LIST_REF) {
+          for (const g of parseGidList(mf.value)) gidSet.add(g)
+        }
+      }
+    }
+    if (gidSet.size === 0) return
+
+    // 2. Batch-resolve unique GIDs (cached in `resolved`).
+    type MetaobjectNodesResponse = {
+      nodes: Array<{
+        id: string
+        displayName: string | null
+        fields: Array<{ key: string; value: string | null }>
+      } | null>
+    }
+    const resolved = new Map<string, string>()
+    const ids = [...gidSet]
+    const BATCH = 250
+    for (let i = 0; i < ids.length; i += BATCH) {
+      const batch = ids.slice(i, i + BATCH)
+      try {
+        const data = await shopifyGraphQL<MetaobjectNodesResponse>(
+          `query ResolveMetaobjects($ids: [ID!]!) {
+            nodes(ids: $ids) {
+              ... on Metaobject {
+                id
+                displayName
+                fields { key value }
+              }
+            }
+          }`,
+          { ids: batch }
+        )
+        for (const node of data.nodes) {
+          if (!node) continue
+          const value = pickMetaobjectValue(node)
+          if (value) resolved.set(node.id, value)
+        }
+      } catch (err) {
+        console.error(
+          `Shopify: metaobject-batch ${Math.floor(i / BATCH) + 1} fejlede — ${err}`
+        )
+      }
+    }
+
+    // 3. Rewrite values in place. Single → resolved text; list → resolved
+    //    values joined with ", ". Unresolved GIDs are kept (single) or skipped
+    //    from the join (list) rather than dropped silently.
+    let rewritten = 0
+    let unresolved = 0
+    for (const p of products) {
+      for (const mf of p.metafields) {
+        if (mf.type === REF && mf.value?.startsWith('gid://shopify/Metaobject/')) {
+          const v = resolved.get(mf.value)
+          if (v) {
+            mf.value = v
+            rewritten++
+          } else {
+            unresolved++
+          }
+        } else if (mf.type === LIST_REF) {
+          const gids = parseGidList(mf.value)
+          if (!gids.length) continue
+          const vals = gids.map((g) => resolved.get(g)).filter((v): v is string => !!v)
+          unresolved += gids.length - vals.length
+          if (vals.length) {
+            mf.value = vals.join(', ')
+            rewritten++
+          }
+        }
+      }
+    }
+    console.log(
+      `[shopify] metaobjects resolved — ${resolved.size}/${gidSet.size} unikke GID'er, ${rewritten} metafield-værdier omskrevet${unresolved ? `, ${unresolved} uløste GID'er bevaret/sprunget` : ''}`
+    )
+  }
+
   async function fetchProductsWithAllData(): Promise<ShopifyData> {
     const t0 = Date.now()
 
@@ -527,6 +651,12 @@ export function createShopifyClient({ shopUrl, accessToken }: ShopifyCredentials
       metafields: productMetafieldsMap.get(p.id) ?? [],
       collections: productCollectionsMap.get(p.id) ?? [],
     }))
+
+    // Resolve metaobject-reference metafields (region, grape, country, …) from
+    // opaque GIDs to real values, in place. One cached pass; read-only.
+    const tResolveStart = Date.now()
+    await resolveMetaobjectReferences(enrichedProducts)
+    console.log(`[shopify] metaobject resolution: ${Date.now() - tResolveStart}ms`)
 
     console.log(`[shopify] fetchProductsWithAllData total: ${Date.now() - t0}ms`)
     return { products: enrichedProducts }

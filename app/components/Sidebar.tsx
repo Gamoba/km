@@ -15,6 +15,7 @@ const FEED_NAV = [
   { label: 'Products', href: 'products', icon: 'box' },
   { label: 'Mapping', href: 'mapping', icon: 'sliders' },
   { label: 'Filters', href: 'filters', icon: 'filter' },
+  { label: 'AI Titles', href: 'optimize', icon: 'sparkles' },
   { label: 'Preview', href: 'preview', icon: 'eye' },
   { label: 'Settings', href: 'settings', icon: 'settings' },
 ] as const
@@ -93,6 +94,11 @@ function NavIcon({ name }: { name: string }) {
         <path d="M4 4a16 16 0 0116 16"/>
         <circle cx="5" cy="19" r="1" fill="currentColor" stroke="none"/>
       </>)
+    case 'sparkles':
+      return svg(cls, <>
+        <path d="M12 3l1.9 4.8L18.7 9.7 13.9 11.6 12 16.4 10.1 11.6 5.3 9.7 10.1 7.8z"/>
+        <path d="M19 14l.7 1.8 1.8.7-1.8.7-.7 1.8-.7-1.8-1.8-.7 1.8-.7z"/>
+      </>)
     case 'settings':
       return svg(cls, <>
         <circle cx="12" cy="12" r="3"/>
@@ -127,11 +133,14 @@ export function Sidebar() {
   const pathname = usePathname()
   const router = useRouter()
   const [userEmail, setUserEmail] = useState<string>('')
-  const [marketLabel, setMarketLabel] = useState<string>('')
+  // Keyed by feed so we can clear the label on feed change by DERIVING it
+  // (below) rather than calling setState synchronously inside the effect.
+  const [marketData, setMarketData] = useState<{ feedId: string; label: string } | null>(null)
   const [feeds, setFeeds] = useState<FeedSummary[]>([])
 
   const activeFeedId = feedIdFromPath(pathname)
   const activeFeed = feeds.find((f) => f.id === activeFeedId) ?? null
+  const marketLabel = marketData && marketData.feedId === activeFeedId ? marketData.label : ''
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data }) => {
@@ -146,24 +155,26 @@ export function Sidebar() {
   }, [])
 
   // Refetch market label whenever the active feed changes — settings are now
-  // per-feed, so the badge only shows when we're inside a feed.
+  // per-feed, so the badge only shows when we're inside a feed. State is only
+  // set asynchronously (in the fetch callbacks); the no-feed/feed-switch clear
+  // is handled by deriving marketLabel above, not by a synchronous setState.
   useEffect(() => {
-    if (!activeFeedId) {
-      setMarketLabel('')
-      return
-    }
+    if (!activeFeedId) return
+    let cancelled = false
     fetch(`/api/settings?feedId=${encodeURIComponent(activeFeedId)}`)
       .then((r) => r.json())
       .then((data: { settings?: { selected_country?: string | null; currency?: string | null } | null }) => {
+        if (cancelled) return
         const s = data.settings
-        if (!s) {
-          setMarketLabel('')
-          return
-        }
-        const parts = [s.selected_country, s.currency].filter(Boolean)
-        setMarketLabel(parts.join(' · '))
+        const label = s ? [s.selected_country, s.currency].filter(Boolean).join(' · ') : ''
+        setMarketData({ feedId: activeFeedId, label })
       })
-      .catch(() => setMarketLabel(''))
+      .catch(() => {
+        if (!cancelled) setMarketData({ feedId: activeFeedId, label: '' })
+      })
+    return () => {
+      cancelled = true
+    }
   }, [activeFeedId])
 
   async function handleSignOut() {
