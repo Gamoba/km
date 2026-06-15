@@ -8,6 +8,7 @@ import { createSupabaseServerClient } from '@/lib/supabase-server'
 import { getOwnedFeed } from '@/lib/feeds'
 import * as svc from '@/lib/titleOptimizationService'
 import * as buckets from '@/lib/optimizationBuckets'
+import * as workshop from '@/lib/bucketExamples'
 import type { OverlapSummary } from '@/lib/titleOptimizationScope'
 import type { RunResult, RerunChoice } from '@/lib/titleOptimizationRun'
 import type { OptimizationOutcome, TitleMethod, TitleRule } from '@/lib/titleOptimizer'
@@ -408,6 +409,20 @@ export async function getBucketCandidates(
   }
 }
 
+// Distinct metafields present in this feed's products (for the scope filter's
+// metafield dropdown). Feed-level — no bucketId needed.
+export async function getFeedMetafields(
+  feedId: string
+): Promise<{ data: buckets.FeedMetafield[] } | { error: string }> {
+  const g = await requireOwnedFeed(feedId)
+  if ('error' in g) return g
+  try {
+    return { data: await buckets.getFeedMetafields(feedId) }
+  } catch (e) {
+    return { error: (e as Error).message }
+  }
+}
+
 export async function getBucketOverlap(
   feedId: string,
   bucketId: string,
@@ -491,6 +506,109 @@ export async function previewBucket(
   if ('error' in g) return g
   try {
     return { data: await buckets.previewBucket(feedId, bucketId, limit) }
+  } catch (e) {
+    return { error: (e as Error).message }
+  }
+}
+
+// ── Example workshop (per-bucket few-shot curation) ──────────────────────────
+
+export async function getBucketTitleConfig(
+  feedId: string,
+  bucketId: string
+): Promise<{ data: workshop.BucketTitleConfig } | { error: string }> {
+  const g = await requireOwnedBucket(feedId, bucketId)
+  if ('error' in g) return g
+  try {
+    return { data: await workshop.getBucketTitleConfig(bucketId) }
+  } catch (e) {
+    return { error: (e as Error).message }
+  }
+}
+
+export async function saveBucketTitleConfig(
+  feedId: string,
+  bucketId: string,
+  config: workshop.BucketTitleConfig
+): Promise<{ error?: string }> {
+  const g = await requireOwnedBucket(feedId, bucketId)
+  if ('error' in g) return g
+  try {
+    await workshop.saveBucketTitleConfig(feedId, bucketId, config)
+    return {}
+  } catch (e) {
+    return { error: (e as Error).message }
+  }
+}
+
+export async function listBucketExamples(
+  feedId: string,
+  bucketId: string
+): Promise<{ data: workshop.BucketExample[] } | { error: string }> {
+  const g = await requireOwnedBucket(feedId, bucketId)
+  if ('error' in g) return g
+  try {
+    return { data: await workshop.listBucketExamples(bucketId) }
+  } catch (e) {
+    return { error: (e as Error).message }
+  }
+}
+
+export async function generateBucketCandidates(
+  feedId: string,
+  bucketId: string
+): Promise<{ data: workshop.GenerateResult } | { error: string }> {
+  const g = await requireOwnedBucket(feedId, bucketId)
+  if ('error' in g) return g
+  try {
+    return { data: await workshop.generateBucketCandidates(feedId, bucketId) }
+  } catch (e) {
+    return { error: (e as Error).message }
+  }
+}
+
+export async function setBucketExampleStatus(
+  feedId: string,
+  bucketId: string,
+  exampleId: string,
+  status: workshop.ExampleStatus
+): Promise<{ error?: string }> {
+  const g = await requireOwnedBucket(feedId, bucketId)
+  if ('error' in g) return g
+  try {
+    await workshop.setExampleStatus(feedId, bucketId, exampleId, status)
+    return {}
+  } catch (e) {
+    return { error: (e as Error).message }
+  }
+}
+
+export async function updateBucketExampleNote(
+  feedId: string,
+  bucketId: string,
+  exampleId: string,
+  note: string
+): Promise<{ error?: string }> {
+  const g = await requireOwnedBucket(feedId, bucketId)
+  if ('error' in g) return g
+  try {
+    await workshop.updateExampleNote(feedId, bucketId, exampleId, note)
+    return {}
+  } catch (e) {
+    return { error: (e as Error).message }
+  }
+}
+
+export async function deleteBucketExample(
+  feedId: string,
+  bucketId: string,
+  exampleId: string
+): Promise<{ error?: string }> {
+  const g = await requireOwnedBucket(feedId, bucketId)
+  if ('error' in g) return g
+  try {
+    await workshop.deleteExample(feedId, bucketId, exampleId)
+    return {}
   } catch (e) {
     return { error: (e as Error).message }
   }

@@ -8,6 +8,12 @@
 
 import type { FilterRule, FilterConfig } from '@/app/filters/actions'
 
+// A metafield the feed actually has, for the field dropdown. When a caller
+// passes these, the metafield field becomes a pick-list instead of free text;
+// without them the free-text `namespace.key` input is kept (back-compat for the
+// feed Filters page and the legacy scope panel).
+export type MetafieldOption = { namespace: string; key: string; count: number }
+
 export const FILTER_FIELDS = [
   { value: 'title', label: 'Title' },
   { value: 'vendor', label: 'Vendor' },
@@ -69,10 +75,12 @@ function RuleRow({
   rule,
   onChange,
   onDelete,
+  metafieldOptions,
 }: {
   rule: FilterRule
   onChange: (patch: Partial<FilterRule>) => void
   onDelete: () => void
+  metafieldOptions?: MetafieldOption[]
 }) {
   const isMetafield = rule.field.startsWith('metafield:')
   const metafieldKey = isMetafield ? rule.field.slice('metafield:'.length) : ''
@@ -99,13 +107,32 @@ function RuleRow({
       </select>
 
       {isMetafield && (
-        <input
-          type="text"
-          value={metafieldKey}
-          onChange={(e) => onChange({ field: `metafield:${e.target.value}` })}
-          placeholder="namespace.key"
-          className={`${selectCls} w-36 shrink-0`}
-        />
+        metafieldOptions ? (
+          <select
+            value={metafieldKey}
+            onChange={(e) => onChange({ field: `metafield:${e.target.value}` })}
+            className={`${selectCls} w-48 shrink-0`}
+          >
+            <option value="">Select metafield…</option>
+            {/* If a saved value isn't among the feed's current metafields, keep it
+                selectable so editing an existing rule doesn't silently drop it. */}
+            {metafieldKey && !metafieldOptions.some((m) => `${m.namespace}.${m.key}` === metafieldKey) && (
+              <option value={metafieldKey}>{metafieldKey} (not in feed)</option>
+            )}
+            {metafieldOptions.map((m) => {
+              const k = `${m.namespace}.${m.key}`
+              return <option key={k} value={k}>{k} ({m.count})</option>
+            })}
+          </select>
+        ) : (
+          <input
+            type="text"
+            value={metafieldKey}
+            onChange={(e) => onChange({ field: `metafield:${e.target.value}` })}
+            placeholder="namespace.key"
+            className={`${selectCls} w-36 shrink-0`}
+          />
+        )
       )}
 
       <select
@@ -152,6 +179,7 @@ export function FilterSection({
   onRemoveRule,
   onUpdateRule,
   onSetOperator,
+  metafieldOptions,
 }: {
   title: string
   description: string
@@ -162,6 +190,7 @@ export function FilterSection({
   onRemoveRule: (i: number) => void
   onUpdateRule: (i: number, patch: Partial<FilterRule>) => void
   onSetOperator: (op: 'AND' | 'OR') => void
+  metafieldOptions?: MetafieldOption[]
 }) {
   return (
     <div className="ff-panel">
@@ -219,6 +248,7 @@ export function FilterSection({
                   rule={rule}
                   onChange={(p) => onUpdateRule(i, p)}
                   onDelete={() => onRemoveRule(i)}
+                  metafieldOptions={metafieldOptions}
                 />
               </div>
             ))}

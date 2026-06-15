@@ -59,13 +59,21 @@ export type BucketSummary = Bucket & {
   needsReview: number
 }
 
-// A candidate product that already belongs to a DIFFERENT bucket.
+// A candidate product that already belongs to a DIFFERENT bucket. `title` is the
+// product's current Shopify title, shown in the overlap UI so the user can see
+// which products they pull in/leave (product_ref stays the internal key).
 export type BucketConflict = {
   product_ref: string
+  title: string
   bucketId: string
   bucketName: string
   status: ExistingStatus | null
 }
+
+// A metafield that actually occurs in this feed's products, with how many
+// products carry it. The UI joins them as `namespace.key` — the token tail the
+// filter stores as `metafield:namespace.key` and resolveField reads.
+export type FeedMetafield = { namespace: string; key: string; count: number }
 
 // ── Internal helpers ─────────────────────────────────────────────────────────
 
@@ -322,6 +330,35 @@ export async function getBucketCandidates(
   return applyFeedFilters(products, filterRows, marketUrl).map((p) => p.shopify_id)
 }
 
+// Distinct metafields present in this feed's products, each with a product
+// count. Powers the scope filter's metafield dropdown (free text → pick from
+// what exists). One row per (product, namespace, key) — see the unique
+// constraint — so a row count per namespace.key is a product count.
+export async function getFeedMetafields(feedId: string): Promise<FeedMetafield[]> {
+  const counts = new Map<string, number>()
+  const PAGE = 1000
+  for (let from = 0; ; from += PAGE) {
+    const { data, error } = await db()
+      .from('product_metafields')
+      .select('namespace, key')
+      .eq('feed_id', feedId)
+      .range(from, from + PAGE - 1)
+    if (error) throw new Error(`Metafields failed: ${error.message}`)
+    const rows = (data ?? []) as { namespace: string; key: string }[]
+    for (const r of rows) {
+      const k = `${r.namespace}.${r.key}`
+      counts.set(k, (counts.get(k) ?? 0) + 1)
+    }
+    if (rows.length < PAGE) break
+  }
+  return [...counts.entries()]
+    .map(([k, count]) => {
+      const dot = k.indexOf('.')
+      return { namespace: k.slice(0, dot), key: k.slice(dot + 1), count }
+    })
+    .sort((a, b) => `${a.namespace}.${a.key}`.localeCompare(`${b.namespace}.${b.key}`))
+}
+
 export async function getBucketMembership(feedId: string, bucketId: string): Promise<string[]> {
   const { data } = await db()
     .from('bucket_products')
@@ -366,8 +403,27 @@ export async function getBucketOverlap(
     const b = memberMap.get(ref)
     if (!b) unassigned++
     else if (b === bucketId) inThisBucket++
-    else conflicts.push({ product_ref: ref, bucketId: b, bucketName: nameById.get(b) ?? '(unknown)', status: statusByRef.get(ref) ?? null })
+    else conflicts.push({ product_ref: ref, title: ref, bucketId: b, bucketName: nameById.get(b) ?? '(unknown)', status: statusByRef.get(ref) ?? null })
   }
+
+  // Attach current product titles so the overlap UI shows names, not IDs.
+  // Falls back to the ref (already set above) for any product we can't read.
+  const conflictRefs = conflicts.map((c) => c.product_ref)
+  if (conflictRefs.length) {
+    const titleByRef = new Map<string, string>()
+    for (let i = 0; i < conflictRefs.length; i += IN_CHUNK) {
+      const { data: prods } = await db()
+        .from('products')
+        .select('shopify_id, title')
+        .eq('feed_id', feedId)
+        .in('shopify_id', conflictRefs.slice(i, i + IN_CHUNK))
+      for (const p of (prods ?? []) as { shopify_id: string; title: string | null }[]) {
+        if (p.title) titleByRef.set(p.shopify_id, p.title)
+      }
+    }
+    for (const c of conflicts) c.title = titleByRef.get(c.product_ref) ?? c.product_ref
+  }
+
   return { conflicts, inThisBucket, unassigned }
 }
 

@@ -6,10 +6,11 @@ import { setBucketMethod } from './actions'
 import { BucketScopeTab } from './BucketScopeTab'
 import { BucketRunTab } from './BucketRunTab'
 import { BucketRulesTab } from './BucketRulesTab'
+import { BucketWorkshopTab } from './BucketWorkshopTab'
 import type { FilterConfig } from '@/app/filters/actions'
 import type { BucketMethod } from '@/lib/optimizationBuckets'
 
-type Tab = 'scope' | 'run' | 'rules'
+type Tab = 'scope' | 'examples' | 'run' | 'rules'
 
 export function BucketEditorClient({
   feedId,
@@ -76,6 +77,7 @@ export function BucketEditorClient({
           </h1>
           <div className="flex gap-1">
             {tabBtn('scope', 'Scope')}
+            {tabBtn('examples', 'Examples')}
             {tabBtn('run', 'Run')}
             {method === 'rule_based' && tabBtn('rules', 'Rules')}
           </div>
@@ -94,6 +96,7 @@ export function BucketEditorClient({
         {tab === 'scope' && (
           <BucketScopeTab feedId={feedId} bucketId={bucketId} initialInclude={initialInclude} initialExclude={initialExclude} />
         )}
+        {tab === 'examples' && <BucketWorkshopTab feedId={feedId} bucketId={bucketId} />}
         {tab === 'run' && <BucketRunTab feedId={feedId} bucketId={bucketId} />}
         {tab === 'rules' && method === 'rule_based' && <BucketRulesTab feedId={feedId} bucketId={bucketId} />}
       </main>

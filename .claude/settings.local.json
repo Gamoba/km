@@ -33,7 +33,23 @@
       "PowerShell(npx tsc --noEmit -p tsconfig.json 2>&1 | Select-Object -First 30; npx eslint lib/optimizationBuckets.ts lib/titleOptimizationRun.ts lib/titleOptimizationScope.ts 2>&1 | Select-Object -First 30; if \\($LASTEXITCODE -eq 0\\) { \"eslint: clean\" })",
       "PowerShell(npx tsc --noEmit -p tsconfig.json 2>&1 | Select-Object -First 30; npx eslint app/optimize/actions.ts 2>&1 | Select-Object -First 30; if \\($LASTEXITCODE -eq 0\\) { \"eslint: clean\" })",
       "PowerShell(npx tsc --noEmit -p tsconfig.json 2>&1 | Select-Object -First 30; npx eslint app/optimize/BucketListPanel.tsx app/optimize/OptimizeClient.tsx \"app/feed/[feedId]/optimize/page.tsx\" \"app/feed/[feedId]/optimize/[bucketId]/page.tsx\" 2>&1 | Select-Object -First 30; if \\($LASTEXITCODE -eq 0\\) { \"eslint: clean\" })",
-      "PowerShell(npx tsc --noEmit -p tsconfig.json 2>&1 | Select-Object -First 30; npx eslint app/optimize/ \"app/feed/[feedId]/optimize/[bucketId]/page.tsx\" 2>&1 | Select-Object -First 40; if \\($LASTEXITCODE -eq 0\\) { \"eslint: clean\" })"
+      "PowerShell(npx tsc --noEmit -p tsconfig.json 2>&1 | Select-Object -First 30; npx eslint app/optimize/ \"app/feed/[feedId]/optimize/[bucketId]/page.tsx\" 2>&1 | Select-Object -First 40; if \\($LASTEXITCODE -eq 0\\) { \"eslint: clean\" })",
+      "PowerShell(npx tsc --noEmit)",
+      "PowerShell(npx tsx scripts/verify-bucket-examples.ts)",
+      "PowerShell(npx eslint lib/bucketExamples.ts app/optimize/actions.ts scripts/verify-bucket-examples.ts)",
+      "PowerShell(npx tsx scripts/workshop-cli.ts setup Gattinara)",
+      "PowerShell(npx tsx scripts/workshop-cli.ts gen 3)",
+      "PowerShell(npx tsx scripts/workshop-cli.ts note 15d3fdea \"Fjern det generiske 'Rotwein' til sidst\"; npx tsx scripts/workshop-cli.ts note 91f61b71 \"Fjern det generiske 'Rotwein' til sidst\"; npx tsx scripts/workshop-cli.ts note 6390a342 \"Fjern 'Rotwein' OG undgaa VERSALER\")",
+      "PowerShell(npx tsx scripts/workshop-cli.ts reject 15d3fdea 91f61b71 6390a342)",
+      "PowerShell(npx tsx scripts/workshop-cli.ts cleanup)",
+      "PowerShell(npx eslint app/optimize/BucketWorkshopTab.tsx)",
+      "PowerShell(npx tsx scripts/workshop-cli.ts metafields)",
+      "PowerShell(npx tsx scripts/workshop-cli.ts config vendor metafield:custom._rgang metafield:custom.region metafield:custom.drue; npx tsx scripts/workshop-cli.ts reset)",
+      "PowerShell(npx tsx scripts/workshop-cli.ts gen 8)",
+      "PowerShell(npx tsx scripts/workshop-cli.ts reset; npx tsx scripts/workshop-cli.ts gen)",
+      "PowerShell(npx tsx scripts/workshop-cli.ts approve 8dd3a5ac 4023ec88; npx tsx scripts/workshop-cli.ts gen)",
+      "PowerShell(npx tsx scripts/workshop-cli.ts approve 2395b0f1 be16bf07; npx tsx scripts/workshop-cli.ts gen)",
+      "PowerShell(npx eslint lib/bucketExamples.ts app/optimize/actions.ts app/optimize/BucketWorkshopTab.tsx scripts/verify-bucket-examples.ts scripts/workshop-cli.ts)"
     ]
   }
 }

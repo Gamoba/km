@@ -1,13 +1,14 @@
 'use client'
 
-import { useMemo, useState, useTransition } from 'react'
+import { useEffect, useMemo, useState, useTransition } from 'react'
 import {
   getBucketCandidates,
   getBucketOverlap,
+  getFeedMetafields,
   saveBucketFilters,
   setBucketMembership,
 } from './actions'
-import { FilterSection, defaultRule } from '@/app/components/FilterEditor'
+import { FilterSection, defaultRule, type MetafieldOption } from '@/app/components/FilterEditor'
 import type { FilterRule, FilterConfig } from '@/app/filters/actions'
 import type { BucketConflict } from '@/lib/optimizationBuckets'
 
@@ -26,6 +27,16 @@ export function BucketScopeTab({
 }) {
   const [include, setInclude] = useState<FilterConfig>(initialInclude)
   const [exclude, setExclude] = useState<FilterConfig>(initialExclude)
+
+  // Feed's actual metafields → the scope filter's metafield dropdown (pick from
+  // what exists instead of typing namespace.key). Undefined until loaded; while
+  // undefined the editor falls back to its free-text metafield input.
+  const [metafields, setMetafields] = useState<MetafieldOption[] | undefined>(undefined)
+  useEffect(() => {
+    getFeedMetafields(feedId).then((r) => {
+      if ('data' in r) setMetafields(r.data)
+    })
+  }, [feedId])
 
   const [candidates, setCandidates] = useState<string[] | null>(null)
   const [overlap, setOverlap] = useState<OverlapData | null>(null)
@@ -61,10 +72,19 @@ export function BucketScopeTab({
     touch()
   }
 
+  // One step: persist the bucket's scope (the include/exclude filter) AND show
+  // the matching products. Membership isn't committed here — it depends on the
+  // overlap pull-in choices below and is confirmed by the second button.
   async function handlePreview() {
     setError(null)
     setPreviewing(true)
     setSaved(false)
+    const f = await saveBucketFilters(feedId, bucketId, include, exclude)
+    if (f.error) {
+      setError(f.error)
+      setPreviewing(false)
+      return
+    }
     const c = await getBucketCandidates(feedId, include, exclude)
     if ('error' in c) {
       setError(c.error)
@@ -98,14 +118,19 @@ export function BucketScopeTab({
     })
   }
 
+  // Bulk pull-in toggle for the overlap list — every conflict at once, then the
+  // user can still fine-tune individual rows.
+  const allPulledIn = !!overlap && overlap.conflicts.length > 0 && overlap.conflicts.every((c) => pullIn.has(c.product_ref))
+  function togglePullAll() {
+    if (!overlap) return
+    setPullIn(allPulledIn ? new Set() : new Set(overlap.conflicts.map((c) => c.product_ref)))
+  }
+
+  // Filter is already persisted by handlePreview (and `stale` forces a re-preview
+  // after any edit), so this step only commits membership.
   function handleSave() {
     setError(null)
     startSave(async () => {
-      const f = await saveBucketFilters(feedId, bucketId, include, exclude)
-      if (f.error) {
-        setError(f.error)
-        return
-      }
       const m = await setBucketMembership(feedId, bucketId, finalRefs)
       if (m.error) setError(m.error)
       else {
@@ -134,6 +159,7 @@ export function BucketScopeTab({
         onRemoveRule={(i) => removeRule('include', i)}
         onUpdateRule={(i, p) => updateRule('include', i, p)}
         onSetOperator={(op) => setOp('include', op)}
+        metafieldOptions={metafields}
       />
       <FilterSection
         title="Exclude products"
@@ -145,10 +171,11 @@ export function BucketScopeTab({
         onRemoveRule={(i) => removeRule('exclude', i)}
         onUpdateRule={(i, p) => updateRule('exclude', i, p)}
         onSetOperator={(op) => setOp('exclude', op)}
+        metafieldOptions={metafields}
       />
 
       <button onClick={handlePreview} disabled={previewing} className="ff-btn-secondary">
-        {previewing ? 'Finding…' : 'Preview matches'}
+        {previewing ? 'Saving…' : 'Save bucket scope and preview matching products'}
       </button>
 
       {candidates && overlap && !stale && (
@@ -172,11 +199,19 @@ export function BucketScopeTab({
                   These already belong to another bucket. Check to pull them into THIS bucket (they move,
                   enforcing one bucket per product); leave unchecked to keep them where they are:
                 </div>
+                <button
+                  type="button"
+                  onClick={togglePullAll}
+                  className="ff-btn-ghost"
+                  style={{ fontSize: '10px', fontWeight: 500, color: 'var(--color-accent)', padding: '2px 6px', alignSelf: 'flex-start' }}
+                >
+                  {allPulledIn ? 'Deselect all' : 'Select all'}
+                </button>
                 <div className="space-y-1" style={{ maxHeight: '280px', overflowY: 'auto' }}>
                   {overlap.conflicts.map((c) => (
                     <label key={c.product_ref} className="flex items-center gap-2" style={{ fontSize: '11px' }}>
                       <input type="checkbox" checked={pullIn.has(c.product_ref)} onChange={() => togglePull(c.product_ref)} />
-                      <span style={{ color: 'var(--color-text-secondary)' }}>{c.product_ref}</span>
+                      <span style={{ color: 'var(--color-text-secondary)' }} title={c.product_ref}>{c.title}</span>
                       <span style={{ color: 'var(--color-text-tertiary)' }}>in “{c.bucketName}”</span>
                       {c.status && (
                         <span className={`ff-badge ${c.status === 'human_edited' ? 'ff-badge-warning' : 'ff-badge-neutral'}`}>
@@ -191,10 +226,10 @@ export function BucketScopeTab({
 
             <div className="flex items-center gap-2">
               <button onClick={handleSave} disabled={isSaving} className="ff-btn-primary">
-                {isSaving ? 'Saving…' : saved ? 'Saved' : `Save scope (${finalRefs.length} products)`}
+                {isSaving ? 'Saving…' : saved ? 'Saved' : `Confirm membership (${finalRefs.length} products)`}
               </button>
               <span style={{ fontSize: '10px', color: 'var(--color-text-tertiary)' }}>
-                Saving sets this bucket&apos;s membership to the {finalRefs.length} products shown.
+                Sets this bucket&apos;s membership to the {finalRefs.length} products shown.
               </span>
             </div>
           </div>
