@@ -12,6 +12,7 @@
 import { adminDb } from '@/lib/feeds'
 import type { SupabaseProduct } from '@/lib/sync'
 import { applyFeedFilters, type FeedFilter } from '@/lib/feedFilters'
+import { getMetafieldNameMap } from '@/lib/metafieldDefinitions'
 import {
   fetchAllActiveProducts,
   type OptimizationScope,
@@ -48,6 +49,11 @@ export type Bucket = {
   feed_id: string
   name: string
   method: BucketMethod
+  // Optional Google Shopping custom label for split-testing (migration 027). Set
+  // together or both null. When set, every product in this bucket emits
+  // <g:custom_label_{index}>{value}</g:custom_label_{index}> in the feed.
+  custom_label_index: number | null
+  custom_label_value: string | null
   created_at: string
   updated_at: string
 }
@@ -73,7 +79,7 @@ export type BucketConflict = {
 // A metafield that actually occurs in this feed's products, with how many
 // products carry it. The UI joins them as `namespace.key` — the token tail the
 // filter stores as `metafield:namespace.key` and resolveField reads.
-export type FeedMetafield = { namespace: string; key: string; count: number }
+export type FeedMetafield = { namespace: string; key: string; count: number; name?: string }
 
 // ── Internal helpers ─────────────────────────────────────────────────────────
 
@@ -115,14 +121,33 @@ async function buildBucketContext(
   bucketId: string,
   method: TitleMethod
 ): Promise<{ config: OptimizerConfig; rulesByType: Map<string, TitleRule> }> {
-  const [settings, { data: shopSettings }] = await Promise.all([
+  // Step 5 — the run is coupled to the bucket's workshop output: its free-text
+  // instructions, its prioritised input fields, and its APPROVED examples as the
+  // few-shot. These replace the retired feed-level few-shot text (queried directly
+  // to avoid a circular import with lib/bucketExamples, which imports this module).
+  const [settings, { data: shopSettings }, { data: titleConfig }, { data: approved }] = await Promise.all([
     getOptimizationSettings(feedId),
     db().from('shop_settings').select('selected_locale').eq('feed_id', feedId).maybeSingle(),
+    db().from('bucket_title_config').select('instructions, input_fields').eq('bucket_id', bucketId).maybeSingle(),
+    db()
+      .from('bucket_examples')
+      .select('generated_title, position')
+      .eq('bucket_id', bucketId)
+      .eq('status', 'approved'),
   ])
+
+  // Approved titles, ordered by their curated slot, become the few-shot block.
+  const fewShotExamples = ((approved ?? []) as { generated_title: string; position: number | null }[])
+    .sort((a, b) => (a.position ?? 0) - (b.position ?? 0))
+    .map((e) => `- ${e.generated_title}`)
+    .join('\n')
+
   const config: OptimizerConfig = {
     charLimit: settings.charLimit,
     targetLanguage: localeToLanguage(shopSettings?.selected_locale as string | null),
-    fewShotExamples: settings.fewShotExamples,
+    fewShotExamples,
+    instructions: (titleConfig?.instructions as string | undefined) ?? '',
+    inputFields: (titleConfig?.input_fields as string[] | undefined) ?? [],
     model: settings.model ?? undefined,
     temperature: settings.temperature ?? undefined,
   }
@@ -351,12 +376,55 @@ export async function getFeedMetafields(feedId: string): Promise<FeedMetafield[]
     }
     if (rows.length < PAGE) break
   }
+  // Definition names (e.g. "custom._rgang" → "Årgang") so the pickers show the
+  // human name, not the mangled key. Best-effort — empty map on any failure.
+  const nameMap = await getMetafieldNameMap(feedId)
   return [...counts.entries()]
     .map(([k, count]) => {
       const dot = k.indexOf('.')
-      return { namespace: k.slice(0, dot), key: k.slice(dot + 1), count }
+      return { namespace: k.slice(0, dot), key: k.slice(dot + 1), count, name: nameMap.get(k) }
     })
     .sort((a, b) => `${a.namespace}.${a.key}`.localeCompare(`${b.namespace}.${b.key}`))
+}
+
+// ── Custom labels (split-testing) ────────────────────────────────────────────
+
+// Sets (or clears) a bucket's Google Shopping custom label. Passing a null index
+// or an empty value CLEARS both columns (the pair invariant from migration 027).
+export async function setBucketCustomLabel(
+  feedId: string,
+  bucketId: string,
+  index: number | null,
+  value: string | null
+): Promise<void> {
+  const trimmed = (value ?? '').trim()
+  const clear = index === null || trimmed === ''
+  if (!clear && (index! < 0 || index! > 4)) {
+    throw new Error('custom_label_index skal være mellem 0 og 4')
+  }
+  const { error } = await db()
+    .from('optimization_buckets')
+    .update({
+      custom_label_index: clear ? null : index,
+      custom_label_value: clear ? null : trimmed,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', bucketId)
+    .eq('feed_id', feedId)
+  if (error) throw new Error(error.message)
+}
+
+// Which custom_label_N indices are already set by a feed-level mapping. The feed
+// mapping wins at generation time, so the UI warns before a bucket label silently
+// loses to one.
+export async function getFeedCustomLabelConflicts(feedId: string): Promise<number[]> {
+  const { data } = await db().from('feed_mappings').select('google_field').eq('feed_id', feedId)
+  const set = new Set<number>()
+  for (const r of (data ?? []) as { google_field: string }[]) {
+    const m = /^custom_label_([0-4])$/.exec(r.google_field)
+    if (m) set.add(Number(m[1]))
+  }
+  return [...set].sort((a, b) => a - b)
 }
 
 export async function getBucketMembership(feedId: string, bucketId: string): Promise<string[]> {
@@ -427,9 +495,11 @@ export async function getBucketOverlap(
   return { conflicts, inThisBucket, unassigned }
 }
 
-// Sets the bucket's membership to exactly `refs`. Upserting on (feed_id,
+// Sets the bucket's FILTER membership to exactly `refs`. Upserting on (feed_id,
 // product_ref) MOVES any ref currently in another bucket into this one
-// (enforcing one-bucket-per-product); refs removed from this bucket are deleted.
+// (enforcing one-bucket-per-product). Manually-added rows (source='manual') in
+// THIS bucket are preserved — only the bucket's own 'filter' rows are rewritten,
+// so manual additions survive a filter re-confirm.
 export async function setBucketMembership(
   feedId: string,
   bucketId: string,
@@ -437,8 +507,25 @@ export async function setBucketMembership(
 ): Promise<void> {
   const unique = [...new Set(refs)]
 
+  // This bucket's existing rows + their source.
+  const { data: existing } = await db()
+    .from('bucket_products')
+    .select('product_ref, source')
+    .eq('feed_id', feedId)
+    .eq('bucket_id', bucketId)
+  const rowsBySource = (existing ?? []) as { product_ref: string; source: string }[]
+  const manualRefs = new Set(rowsBySource.filter((r) => r.source === 'manual').map((r) => r.product_ref))
+  const currentFilterRefs = rowsBySource.filter((r) => r.source === 'filter').map((r) => r.product_ref)
+
   if (unique.length) {
-    const rows = unique.map((product_ref) => ({ bucket_id: bucketId, feed_id: feedId, product_ref }))
+    // A ref already manual in THIS bucket stays 'manual' (don't downgrade — it must
+    // keep surviving future filter changes); everything else is a 'filter' row.
+    const rows = unique.map((product_ref) => ({
+      bucket_id: bucketId,
+      feed_id: feedId,
+      product_ref,
+      source: manualRefs.has(product_ref) ? 'manual' : 'filter',
+    }))
     for (let i = 0; i < rows.length; i += 500) {
       const { error } = await db()
         .from('bucket_products')
@@ -447,19 +534,105 @@ export async function setBucketMembership(
     }
   }
 
-  // Delete rows that were in THIS bucket but are no longer wanted.
-  const current = await getBucketMembership(feedId, bucketId)
+  // Delete only THIS bucket's FILTER rows that are no longer wanted (manual rows
+  // are never touched here).
   const keep = new Set(unique)
-  const toDelete = current.filter((r) => !keep.has(r))
+  const toDelete = currentFilterRefs.filter((r) => !keep.has(r))
   for (let i = 0; i < toDelete.length; i += IN_CHUNK) {
     const { error } = await db()
       .from('bucket_products')
       .delete()
       .eq('feed_id', feedId)
       .eq('bucket_id', bucketId)
+      .eq('source', 'filter')
       .in('product_ref', toDelete.slice(i, i + IN_CHUNK))
     if (error) throw new Error(error.message)
   }
+}
+
+// ── Manual membership (additive to the filter) ───────────────────────────────
+
+// Manually add products to a bucket (source='manual'). Upsert-moves any ref owned
+// by another bucket (one-product-one-bucket); callers run getBucketOverlap first
+// to warn before a move. Marking them 'manual' makes them survive filter changes.
+export async function addManualProducts(feedId: string, bucketId: string, refs: string[]): Promise<void> {
+  const unique = [...new Set(refs)].filter(Boolean)
+  if (!unique.length) return
+  const rows = unique.map((product_ref) => ({ bucket_id: bucketId, feed_id: feedId, product_ref, source: 'manual' }))
+  for (let i = 0; i < rows.length; i += 500) {
+    const { error } = await db()
+      .from('bucket_products')
+      .upsert(rows.slice(i, i + 500), { onConflict: 'feed_id,product_ref' })
+    if (error) throw new Error(error.message)
+  }
+}
+
+// Remove a manually-added product. Scoped to source='manual' so it never drops a
+// filter member (those are governed by the filter).
+export async function removeManualProduct(feedId: string, bucketId: string, ref: string): Promise<void> {
+  const { error } = await db()
+    .from('bucket_products')
+    .delete()
+    .eq('feed_id', feedId)
+    .eq('bucket_id', bucketId)
+    .eq('product_ref', ref)
+    .eq('source', 'manual')
+  if (error) throw new Error(error.message)
+}
+
+// The bucket's manually-added products (source='manual'), with titles for the UI.
+export async function getBucketManualProducts(
+  feedId: string,
+  bucketId: string
+): Promise<{ product_ref: string; title: string }[]> {
+  const { data } = await db()
+    .from('bucket_products')
+    .select('product_ref')
+    .eq('feed_id', feedId)
+    .eq('bucket_id', bucketId)
+    .eq('source', 'manual')
+  const refs = ((data ?? []) as { product_ref: string }[]).map((r) => r.product_ref)
+  if (!refs.length) return []
+  const titleByRef = new Map<string, string>()
+  for (let i = 0; i < refs.length; i += IN_CHUNK) {
+    const { data: prods } = await db()
+      .from('products')
+      .select('shopify_id, title')
+      .eq('feed_id', feedId)
+      .in('shopify_id', refs.slice(i, i + IN_CHUNK))
+    for (const p of (prods ?? []) as { shopify_id: string; title: string | null }[]) {
+      titleByRef.set(p.shopify_id, p.title ?? p.shopify_id)
+    }
+  }
+  return refs.map((r) => ({ product_ref: r, title: titleByRef.get(r) ?? r }))
+}
+
+// Free-text product search (title/vendor) for the manual-add picker. Sanitises
+// the query so it can't break the PostgREST or-filter.
+export async function searchFeedProducts(
+  feedId: string,
+  query: string,
+  limit = 20
+): Promise<{ product_ref: string; title: string; vendor: string | null; image_url: string | null }[]> {
+  const safe = query.replace(/[,()]/g, ' ').trim()
+  if (!safe) return []
+  const like = `%${safe}%`
+  const { data, error } = await db()
+    .from('products')
+    .select('shopify_id, title, vendor, images')
+    .eq('feed_id', feedId)
+    .eq('status', 'active')
+    .or(`title.ilike.${like},vendor.ilike.${like}`)
+    .limit(limit)
+  if (error) throw new Error(`Product search failed: ${error.message}`)
+  return ((data ?? []) as { shopify_id: string; title: string | null; vendor: string | null; images: { src?: string }[] | null }[]).map(
+    (p) => ({
+      product_ref: p.shopify_id,
+      title: p.title ?? p.shopify_id,
+      vendor: p.vendor ?? null,
+      image_url: p.images?.[0]?.src ?? null,
+    })
+  )
 }
 
 // ── Bucket scope (membership-based, for planRun) ─────────────────────────────

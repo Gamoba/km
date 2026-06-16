@@ -2,12 +2,9 @@
 
 import { useState, useTransition } from 'react'
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 import { createBucket, renameBucket, deleteBucket } from './actions'
-import type { BucketSummary, BucketMethod } from '@/lib/optimizationBuckets'
-
-function methodLabel(m: BucketMethod) {
-  return m === 'auto' ? 'Automatic' : 'Rule-based'
-}
+import type { BucketSummary } from '@/lib/optimizationBuckets'
 
 export function BucketListPanel({
   feedId,
@@ -16,9 +13,9 @@ export function BucketListPanel({
   feedId: string
   initialBuckets: BucketSummary[]
 }) {
+  const router = useRouter()
   const [list, setList] = useState<BucketSummary[]>(initialBuckets)
   const [name, setName] = useState('')
-  const [method, setMethod] = useState<BucketMethod>('auto')
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editName, setEditName] = useState('')
   const [error, setError] = useState<string | null>(null)
@@ -28,15 +25,14 @@ export function BucketListPanel({
     setError(null)
     if (!name.trim()) return
     startTransition(async () => {
-      const r = await createBucket(feedId, name.trim(), method)
+      // Method is no longer a user choice — every bucket runs the workshop path
+      // (instructions + curated examples + input fields). 'auto' is the default.
+      const r = await createBucket(feedId, name.trim(), 'auto')
       if ('error' in r) setError(r.error)
-      else {
-        setList((prev) => [
-          ...prev,
-          { ...r.data, memberCount: 0, aiGenerated: 0, humanEdited: 0, needsReview: 0 },
-        ])
-        setName('')
-      }
+      // Go straight into the new bucket's editor (which opens on the Scope step),
+      // so the user defines membership immediately instead of landing on an empty
+      // 0-product row in the list.
+      else router.push(`/feed/${feedId}/optimize/${r.data.id}`)
     })
   }
 
@@ -92,13 +88,6 @@ export function BucketListPanel({
               className="ff-input w-56"
             />
           </div>
-          <div>
-            <label className="ff-label">Method</label>
-            <select value={method} onChange={(e) => setMethod(e.target.value as BucketMethod)} className="ff-select w-40">
-              <option value="auto">Automatic</option>
-              <option value="rule_based">Rule-based</option>
-            </select>
-          </div>
           <button onClick={handleCreate} disabled={isPending || !name.trim()} className="ff-btn-primary">
             Create bucket
           </button>
@@ -140,7 +129,6 @@ export function BucketListPanel({
                       >
                         {b.name}
                       </Link>
-                      <span className="ff-badge ff-badge-neutral">{methodLabel(b.method)}</span>
                     </div>
                   )}
                   <div className="mt-1" style={{ fontSize: '11px', color: 'var(--color-text-tertiary)' }}>

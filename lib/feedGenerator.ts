@@ -340,6 +340,68 @@ async function attachOptimizedTitles(
   }
 }
 
+type BucketCustomLabel = { index: number; value: string }
+
+// Loads product_ref → { custom_label index, value } for every product that
+// belongs to a bucket with a custom label set (migration 027). One product
+// belongs to exactly one bucket, so each ref maps to at most one label. Paged
+// with a stable order so large feeds don't drop rows at page boundaries.
+async function fetchBucketCustomLabels(
+  db: ReturnType<typeof adminClient>,
+  feedId: string
+): Promise<Map<string, BucketCustomLabel>> {
+  const map = new Map<string, BucketCustomLabel>()
+
+  const { data: bkts, error: bErr } = await db
+    .from('optimization_buckets')
+    .select('id, custom_label_index, custom_label_value')
+    .eq('feed_id', feedId)
+    .not('custom_label_value', 'is', null)
+  if (bErr) throw new Error(`Bucket custom labels failed: ${bErr.message}`)
+
+  const labelByBucket = new Map<string, BucketCustomLabel>()
+  for (const b of (bkts ?? []) as { id: string; custom_label_index: number | null; custom_label_value: string | null }[]) {
+    if (b.custom_label_index !== null && b.custom_label_value) {
+      labelByBucket.set(b.id, { index: b.custom_label_index, value: b.custom_label_value })
+    }
+  }
+  if (labelByBucket.size === 0) return map
+
+  const bucketIds = [...labelByBucket.keys()]
+  const PAGE_SIZE = 1000
+  let from = 0
+  while (true) {
+    const { data, error } = await db
+      .from('bucket_products')
+      .select('product_ref, bucket_id')
+      .eq('feed_id', feedId)
+      .in('bucket_id', bucketIds)
+      .order('product_ref', { ascending: true })
+      .range(from, from + PAGE_SIZE - 1)
+    if (error) throw new Error(`Bucket members failed: ${error.message}`)
+    if (!data || data.length === 0) break
+    for (const r of data as { product_ref: string; bucket_id: string }[]) {
+      const lbl = labelByBucket.get(r.bucket_id)
+      if (lbl) map.set(r.product_ref, lbl)
+    }
+    if (data.length < PAGE_SIZE) break
+    from += PAGE_SIZE
+  }
+  return map
+}
+
+// Which custom_label_N indices a feed-level mapping already emits. A feed mapping
+// WINS over a bucket label for the same index, so we skip the bucket label there
+// (the conflict is surfaced in the bucket UI, not silently overwritten).
+function mappedCustomLabelIndices(mappings: FeedMapping[]): Set<number> {
+  const set = new Set<number>()
+  for (const m of mappings) {
+    const cm = /^custom_label_([0-4])$/.exec(m.google_field)
+    if (cm) set.add(Number(cm[1]))
+  }
+  return set
+}
+
 export async function generateFeed(feedId: string): Promise<FeedResult> {
   const db = adminClient()
 
@@ -372,6 +434,18 @@ export async function generateFeed(feedId: string): Promise<FeedResult> {
   // onto the products before resolving fields.
   if (mappingsUseAiTitle(mappings)) await attachOptimizedTitles(db, feedId, rawProducts)
 
+  // Per-bucket custom labels (split-testing). A product's bucket label is emitted
+  // as <g:custom_label_N> UNLESS a feed mapping already covers that N (mapping
+  // wins). Empty maps when no bucket has a label set, so the cost is one cheap
+  // query for feeds that don't use this.
+  const customLabelByRef = await fetchBucketCustomLabels(db, feedId)
+  const mappedClIndices = mappedCustomLabelIndices(mappings)
+  const customLabelLine = (product: SupabaseProduct): string | null => {
+    const lbl = customLabelByRef.get(product.shopify_id)
+    if (!lbl || mappedClIndices.has(lbl.index)) return null
+    return xmlLine(`custom_label_${lbl.index}`, lbl.value)
+  }
+
   const products = applyFeedFilters(rawProducts, filterRows, marketUrl)
 
   const needsAi = mappings.some((m) => m.mapping_type === 'AI')
@@ -398,6 +472,12 @@ export async function generateFeed(feedId: string): Promise<FeedResult> {
         const value = await resolvedValue(mapping, product, anthropic, marketUrl)
         if (value !== '') lines.push(xmlLine(mapping.google_field, value))
       }
+
+      // Bucket custom label (split-test) — after mappings; skipped when a mapping
+      // already covers that custom_label_N.
+      const clLine = customLabelLine(product)
+      if (clLine) lines.push(clLine)
+
       if (lines.length > 0) items.push(`    <item>\n${lines.join('\n')}\n    </item>`)
     }
   } else {
@@ -423,6 +503,10 @@ export async function generateFeed(feedId: string): Promise<FeedResult> {
             addedFields.add(mapping.google_field)
           }
         }
+
+        // Bucket custom label applies to the product, so every variant carries it.
+        const clLine = customLabelLine(product)
+        if (clLine) mappedLines.push(clLine)
 
         // Always-inject: id and item_group_id
         const autoLines: string[] = [

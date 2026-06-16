@@ -4,6 +4,7 @@
 // around these.
 
 import { adminDb } from '@/lib/feeds'
+import { getMetafieldNameMap } from '@/lib/metafieldDefinitions'
 import type { SupabaseProduct } from '@/lib/sync'
 import { getOptimizationScope, type OverlapSummary } from '@/lib/titleOptimizationScope'
 import type { FeedFilter } from '@/lib/feedFilters'
@@ -25,6 +26,7 @@ import {
   type OptimizerProduct,
   type TitleMethod,
   type TitleRule,
+  type ValidationIssue,
 } from '@/lib/titleOptimizer'
 
 // ── Settings ─────────────────────────────────────────────────────────────────
@@ -229,6 +231,207 @@ export async function saveManualTitle(
     { onConflict: 'feed_id,product_ref' }
   )
   if (error) throw new Error(error.message)
+}
+
+// ── Review (needs_review queue) ──────────────────────────────────────────────
+
+// One product awaiting manual review — its AI title failed code validation (or
+// the response couldn't be parsed). proposed_title is null only in the latter
+// case. validation_issues says why it failed, for the review UI.
+export type ReviewItem = {
+  product_ref: string
+  original_title: string
+  proposed_title: string | null
+  validation_issues: ValidationIssue[]
+  method: string | null
+}
+
+// The bucket's needs_review products (newest first). Scoped by the producing
+// bucket_id so each bucket reviews only what it generated.
+export async function listBucketReview(feedId: string, bucketId: string): Promise<ReviewItem[]> {
+  const { data, error } = await adminDb()
+    .from('product_title_optimizations')
+    .select('product_ref, original_title, proposed_title, validation_issues, method, updated_at')
+    .eq('feed_id', feedId)
+    .eq('bucket_id', bucketId)
+    .eq('status', 'needs_review')
+    .order('updated_at', { ascending: false })
+  if (error) throw new Error(error.message)
+  return ((data ?? []) as Record<string, unknown>[]).map((r) => ({
+    product_ref: r.product_ref as string,
+    original_title: r.original_title as string,
+    proposed_title: (r.proposed_title as string | null) ?? null,
+    validation_issues: (r.validation_issues as ValidationIssue[] | null) ?? [],
+    method: (r.method as string | null) ?? null,
+  }))
+}
+
+// Reject a needs_review proposal: lock the product to its ORIGINAL title and
+// mark it human_edited, so the feed keeps the original and re-runs leave it
+// alone (it won't return to the review queue). Reuses saveManualTitle's upsert
+// (which preserves bucket_id and clears validation_issues).
+export async function rejectOptimization(feedId: string, productRef: string): Promise<void> {
+  const { data } = await adminDb()
+    .from('product_title_optimizations')
+    .select('original_title')
+    .eq('feed_id', feedId)
+    .eq('product_ref', productRef)
+    .maybeSingle()
+  const original = data?.original_title as string | undefined
+  if (!original) throw new Error('Produktet har ingen optimerings-række at forkaste')
+  await saveManualTitle(feedId, productRef, original)
+}
+
+// ── Results (the bucket's whole catalogue + its optimization state) ───────────
+
+export type ResultStatus = 'ai_generated' | 'human_edited' | 'needs_review' | 'not_optimized'
+
+// One row in the unified Results view: original vs. new title + status. new_title
+// is the accepted title, or (for needs_review) the proposed title that failed
+// validation, or null when the product has no optimization row yet.
+export type ResultItem = {
+  product_ref: string
+  original_title: string
+  new_title: string | null
+  status: ResultStatus
+  validation_issues: ValidationIssue[]
+  image_url: string | null // first product image (cached at sync), for the row thumbnail
+}
+
+// Sort key: surface review work first, then the un-touched, then the done.
+const RESULT_ORDER: Record<ResultStatus, number> = {
+  needs_review: 0,
+  not_optimized: 1,
+  ai_generated: 2,
+  human_edited: 3,
+}
+
+// Every product in the bucket, joined with its optimization row (if any).
+// Products with no row are 'not_optimized' (the feed uses their Shopify title).
+// bucket_products is queried directly to avoid a circular import with
+// optimizationBuckets (which imports this module).
+export async function listBucketResults(feedId: string, bucketId: string): Promise<ResultItem[]> {
+  const db = adminDb()
+  const { data: members } = await db
+    .from('bucket_products')
+    .select('product_ref')
+    .eq('feed_id', feedId)
+    .eq('bucket_id', bucketId)
+  const refs = ((members ?? []) as { product_ref: string }[]).map((m) => m.product_ref)
+  if (refs.length === 0) return []
+
+  const titleByRef = new Map<string, string>()
+  const imageByRef = new Map<string, string>()
+  const optByRef = new Map<string, Record<string, unknown>>()
+  const CHUNK = 200
+  for (let i = 0; i < refs.length; i += CHUNK) {
+    const slice = refs.slice(i, i + CHUNK)
+    const [{ data: prods }, { data: opts }] = await Promise.all([
+      db.from('products').select('shopify_id, title, images').eq('feed_id', feedId).in('shopify_id', slice),
+      db
+        .from('product_title_optimizations')
+        .select('product_ref, status, original_title, optimized_title, proposed_title, validation_issues')
+        .eq('feed_id', feedId)
+        .in('product_ref', slice),
+    ])
+    for (const p of (prods ?? []) as { shopify_id: string; title: string | null; images: { src?: string }[] | null }[]) {
+      titleByRef.set(p.shopify_id, p.title ?? '')
+      const src = p.images?.[0]?.src
+      if (src) imageByRef.set(p.shopify_id, src)
+    }
+    for (const o of (opts ?? []) as Record<string, unknown>[]) optByRef.set(o.product_ref as string, o)
+  }
+
+  const items: ResultItem[] = refs.map((ref) => {
+    const image_url = imageByRef.get(ref) ?? null
+    const opt = optByRef.get(ref)
+    if (!opt) {
+      return {
+        product_ref: ref,
+        original_title: titleByRef.get(ref) ?? '',
+        new_title: null,
+        status: 'not_optimized',
+        validation_issues: [],
+        image_url,
+      }
+    }
+    return {
+      product_ref: ref,
+      original_title: (opt.original_title as string | null) ?? titleByRef.get(ref) ?? '',
+      new_title: (opt.optimized_title as string | null) ?? (opt.proposed_title as string | null) ?? null,
+      status: opt.status as ResultStatus,
+      validation_issues: (opt.validation_issues as ValidationIssue[] | null) ?? [],
+      image_url,
+    }
+  })
+  items.sort((a, b) => RESULT_ORDER[a.status] - RESULT_ORDER[b.status])
+  return items
+}
+
+// token is the unique field identifier (e.g. "custom.land" / "custom.land_obj"),
+// used as a stable React key — two fields can share a display label (both "Land")
+// but never a token. label is the human name shown in the UI.
+export type ProductField = { token: string; label: string; value: string }
+export type ProductDetail = {
+  product_ref: string
+  current_title: string
+  original_title: string
+  new_title: string | null
+  status: ResultStatus
+  validation_issues: ValidationIssue[]
+  fields: ProductField[]
+}
+
+// Read-only product data for the expandable detail row: the resolved field values
+// (metaobject GIDs are already rewritten to labels at sync time) plus the
+// optimization state. Used to spot data conflicts (e.g. a vendor that doesn't
+// match the title).
+export async function getBucketProductDetail(feedId: string, productRef: string): Promise<ProductDetail> {
+  const db = adminDb()
+  const [{ data: prod }, { data: opt }] = await Promise.all([
+    db
+      .from('products')
+      .select('*, metafields:product_metafields(*)')
+      .eq('feed_id', feedId)
+      .eq('shopify_id', productRef)
+      .maybeSingle(),
+    db
+      .from('product_title_optimizations')
+      .select('status, original_title, optimized_title, proposed_title, validation_issues')
+      .eq('feed_id', feedId)
+      .eq('product_ref', productRef)
+      .maybeSingle(),
+  ])
+  if (!prod) throw new Error('Produkt ikke fundet')
+  const op = toOptimizerProduct(prod as SupabaseProduct)
+
+  // Metafield labels: prefer the definition NAME (e.g. "Årgang") over the raw,
+  // possibly-mangled key (e.g. "custom._rgang"). Best-effort — falls back to the
+  // key when no definition / Shopify is unreachable.
+  const nameMap = await getMetafieldNameMap(feedId)
+
+  const fields: ProductField[] = []
+  const push = (token: string, label: string, value: string) => {
+    if (value && value.trim()) fields.push({ token, label, value })
+  }
+  push('vendor', 'Vendor', op.vendor ?? '')
+  push('product_type', 'Product type', op.product_type ?? '')
+  push('tags', 'Tags', op.tags.join(', '))
+  push('variant_options', 'Variant options', op.variant_options.join(', '))
+  // Metafield token = "namespace.key" (always unique); label prefers the
+  // definition name (which CAN collide, e.g. two fields both named "Land").
+  for (const m of op.metafields) push(m.key, nameMap.get(m.key) ?? m.key, m.value)
+
+  const status = (opt?.status as ResultStatus | undefined) ?? 'not_optimized'
+  return {
+    product_ref: productRef,
+    current_title: (prod as SupabaseProduct).title ?? '',
+    original_title: (opt?.original_title as string | undefined) ?? (prod as SupabaseProduct).title ?? '',
+    new_title: (opt?.optimized_title as string | null) ?? (opt?.proposed_title as string | null) ?? null,
+    status,
+    validation_issues: (opt?.validation_issues as ValidationIssue[] | null) ?? [],
+    fields,
+  }
 }
 
 // ── Run ──────────────────────────────────────────────────────────────────────

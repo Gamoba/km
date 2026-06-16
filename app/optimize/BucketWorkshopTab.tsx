@@ -17,6 +17,7 @@ import {
   setBucketExampleStatus,
   deleteBucketExample,
   getFeedMetafields,
+  getProductCurrentTitle,
 } from './actions'
 import { FILTER_FIELDS, type MetafieldOption } from '@/app/components/FilterEditor'
 import type { BucketExample } from '@/lib/bucketExamples'
@@ -38,10 +39,15 @@ function TrashIcon() {
   )
 }
 
-// Human label for a field token. Metafields show their namespace.key tail with a
-// "(metafield)" hint; standard fields use their friendly label.
-function fieldLabel(token: string): string {
-  if (token.startsWith('metafield:')) return `${token.slice('metafield:'.length)} (metafield)`
+// Human label for a field token. Metafields prefer the definition NAME (e.g.
+// "Årgang") over the raw, possibly-mangled key ("custom._rgang"), falling back to
+// the key; standard fields use their friendly label.
+function fieldLabel(token: string, metafields?: MetafieldOption[]): string {
+  if (token.startsWith('metafield:')) {
+    const nsKey = token.slice('metafield:'.length)
+    const opt = metafields?.find((m) => `${m.namespace}.${m.key}` === nsKey)
+    return opt?.name ? `${opt.name} (metafield)` : `${nsKey} (metafield)`
+  }
   return STANDARD_FIELDS.find((f) => f.value === token)?.label ?? token
 }
 
@@ -69,8 +75,14 @@ export function BucketWorkshopTab({ feedId, bucketId }: { feedId: string; bucket
   const [loading, setLoading] = useState(true)
   const [savingConfig, setSavingConfig] = useState(false)
   const [savedConfig, setSavedConfig] = useState(false)
+  // Tracks unsaved config edits (instructions / input fields) so the Save control
+  // can surface an "unsaved changes" state and stay easy to find.
+  const [dirty, setDirty] = useState(false)
   const [generating, setGenerating] = useState(false)
   const [unusedLeft, setUnusedLeft] = useState<number | null>(null)
+  // Current (source) title of the product this round's candidates are all built
+  // from — shown above them so "same product, five ways" is obvious.
+  const [roundProductTitle, setRoundProductTitle] = useState('')
   const [error, setError] = useState<string | null>(null)
 
   // Initial load — config + metafields + examples. setState only in callbacks.
@@ -112,6 +124,30 @@ export function BucketWorkshopTab({ feedId, bucketId }: { feedId: string; bucket
   const candidates = useMemo(() => examples.filter((e) => e.status === 'candidate'), [examples])
   const rejected = useMemo(() => examples.filter((e) => e.status === 'rejected'), [examples])
 
+  // This round's candidates all share one product_ref — fetch that product's
+  // current title for the round header (works both right after generation and on
+  // a later reload, since it's keyed off the persisted candidates).
+  const roundProductRef = candidates[0]?.product_ref ?? null
+  useEffect(() => {
+    if (!roundProductRef) {
+      setRoundProductTitle('')
+      return
+    }
+    let cancelled = false
+    getProductCurrentTitle(feedId, bucketId, roundProductRef).then((r) => {
+      if (!cancelled && 'data' in r) setRoundProductTitle(r.data)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [feedId, bucketId, roundProductRef])
+
+  // Mark config dirty (unsaved) — called from every instructions/field edit.
+  function markDirty() {
+    setSavedConfig(false)
+    setDirty(true)
+  }
+
   async function refreshExamples() {
     const r = await listBucketExamples(feedId, bucketId)
     if ('data' in r) setExamples(r.data)
@@ -130,6 +166,7 @@ export function BucketWorkshopTab({ feedId, bucketId }: { feedId: string; bucket
     setError(null)
     setSavingConfig(true)
     if (await persistConfig()) {
+      setDirty(false)
       setSavedConfig(true)
       setTimeout(() => setSavedConfig(false), 2500)
     }
@@ -148,11 +185,11 @@ export function BucketWorkshopTab({ feedId, bucketId }: { feedId: string; bucket
 
   function toggleField(token: string) {
     setInputFields((p) => (p.includes(token) ? p.filter((t) => t !== token) : [...p, token]))
-    setSavedConfig(false)
+    markDirty()
   }
   function removeField(token: string) {
     setInputFields((p) => p.filter((t) => t !== token))
-    setSavedConfig(false)
+    markDirty()
   }
   // Reorder the selected (priority) list — moves the dragged item to a new index.
   function moveField(from: number, to: number) {
@@ -163,7 +200,7 @@ export function BucketWorkshopTab({ feedId, bucketId }: { feedId: string; bucket
       next.splice(to, 0, moved)
       return next
     })
-    setSavedConfig(false)
+    markDirty()
   }
 
   async function handleGenerate() {
@@ -175,6 +212,7 @@ export function BucketWorkshopTab({ feedId, bucketId }: { feedId: string; bucket
       setGenerating(false)
       return
     }
+    setDirty(false)
     const r = await generateBucketCandidates(feedId, bucketId)
     if ('error' in r) {
       setError(r.error)
@@ -219,10 +257,23 @@ export function BucketWorkshopTab({ feedId, bucketId }: { feedId: string; bucket
         approved examples + instructions + input fields.
       </p>
 
-      {/* Config: instructions + input fields */}
-      <div className="ff-panel">
+      {/* 50/50: left = config (instructions + field picker), right = the workflow
+          (generate, candidates, approved, history). Stacks on narrow screens. */}
+      <div className="flex flex-col lg:flex-row gap-3 items-start">
+        {/* Left 50% */}
+        <div className="w-full lg:w-1/2 space-y-3">
+
+      {/* Config: instructions + input fields.
+          overflow:visible so the field dropdown can spill past the card (the
+          shared .ff-panel clips with overflow:hidden otherwise). */}
+      <div className="ff-panel" style={{ overflow: 'visible' }}>
         <div className="ff-panel-header" style={{ textTransform: 'none', letterSpacing: 0, fontSize: '12px', padding: '10px 14px' }}>
-          Instructions &amp; input fields
+          <span>Instructions &amp; input fields</span>
+          {dirty && (
+            <span className="ff-badge ff-badge-warning shrink-0" style={{ textTransform: 'none', letterSpacing: 0 }}>
+              Unsaved changes
+            </span>
+          )}
         </div>
         <div className="p-3.5 space-y-3">
           <div>
@@ -231,7 +282,7 @@ export function BucketWorkshopTab({ feedId, bucketId }: { feedId: string; bucket
               value={instructions}
               onChange={(e) => {
                 setInstructions(e.target.value)
-                setSavedConfig(false)
+                markDirty()
               }}
               rows={3}
               placeholder="e.g. Brand first. Include vintage if present. Keep it short and searchable."
@@ -260,7 +311,7 @@ export function BucketWorkshopTab({ feedId, bucketId }: { feedId: string; bucket
                       style={{ fontSize: '11px', color: 'var(--color-text-secondary)', cursor: 'pointer' }}
                     >
                       <input type="checkbox" checked={inputFields.includes(token)} onChange={() => toggleField(token)} />
-                      {fieldLabel(token)}
+                      {fieldLabel(token, metafields)}
                     </label>
                   ))}
                   {allFields.length === 0 && (
@@ -298,7 +349,7 @@ export function BucketWorkshopTab({ feedId, bucketId }: { feedId: string; bucket
                   >
                     <span style={{ color: 'var(--color-text-tertiary)' }}><GripIcon /></span>
                     <span className="ff-badge ff-badge-neutral shrink-0" style={{ textTransform: 'none', letterSpacing: 0 }}>{i + 1}</span>
-                    <span className="flex-1 min-w-0" style={{ color: 'var(--color-text-primary)' }}>{fieldLabel(t)}</span>
+                    <span className="flex-1 min-w-0" style={{ color: 'var(--color-text-primary)' }}>{fieldLabel(t, metafields)}</span>
                     <button type="button" onClick={() => removeField(t)} className="ff-btn-ghost shrink-0 w-5 h-5" aria-label="Remove field">×</button>
                   </div>
                 ))
@@ -311,11 +362,25 @@ export function BucketWorkshopTab({ feedId, bucketId }: { feedId: string; bucket
             </p>
           </div>
 
-          <button onClick={handleSaveConfig} disabled={savingConfig} className="ff-btn-secondary">
-            {savingConfig ? 'Saving…' : savedConfig ? 'Saved' : 'Save settings'}
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleSaveConfig}
+              disabled={savingConfig || (!dirty && !savedConfig)}
+              className={dirty ? 'ff-btn-primary' : 'ff-btn-secondary'}
+            >
+              {savingConfig ? 'Saving…' : savedConfig ? 'Saved ✓' : dirty ? 'Save settings' : 'Saved'}
+            </button>
+            {dirty && (
+              <span style={{ fontSize: '10px', color: 'var(--color-text-tertiary)' }}>
+                You have unsaved changes.
+              </span>
+            )}
+          </div>
         </div>
       </div>
+        </div>
+        {/* Right 50% */}
+        <div className="w-full lg:w-1/2 space-y-3">
 
       {/* Approved examples (few-shot) */}
       <div className="ff-panel">
@@ -387,6 +452,21 @@ export function BucketWorkshopTab({ feedId, bucketId }: { feedId: string; bucket
             This round — pick the approaches you like (selecting approves)
           </div>
           <div className="p-3.5 space-y-2.5">
+            {/* Same product, five ways — the source title these candidates rewrite. */}
+            {roundProductTitle && (
+              <div
+                style={{
+                  fontSize: '11px',
+                  padding: '6px 10px',
+                  borderRadius: '5px',
+                  background: 'var(--color-background-secondary)',
+                  border: '1px solid var(--color-border-tertiary)',
+                }}
+              >
+                <span style={{ color: 'var(--color-text-tertiary)' }}>Same product, five ways · current title: </span>
+                <span style={{ color: 'var(--color-text-secondary)' }}>{roundProductTitle}</span>
+              </div>
+            )}
             {candidates.map((e) => {
               const v = validationById[e.id]
               return (
@@ -453,6 +533,33 @@ export function BucketWorkshopTab({ feedId, bucketId }: { feedId: string; bucket
             ))}
           </div>
         </details>
+      )}
+        </div>
+      </div>
+
+      {/* Sticky save bar — only while there are unsaved config changes, so it's
+          reachable even when the config card is scrolled out of view. */}
+      {dirty && (
+        <div
+          className="flex items-center justify-between gap-3"
+          style={{
+            position: 'sticky',
+            bottom: '8px',
+            zIndex: 25,
+            padding: '8px 12px',
+            borderRadius: '6px',
+            background: 'var(--color-background-secondary)',
+            border: '1px solid var(--color-border-secondary)',
+            boxShadow: '0 2px 8px rgba(0,0,0,0.12)',
+          }}
+        >
+          <span style={{ fontSize: '11px', color: 'var(--color-text-secondary)' }}>
+            You have unsaved changes to this bucket&apos;s instructions / input fields.
+          </span>
+          <button onClick={handleSaveConfig} disabled={savingConfig} className="ff-btn-primary shrink-0">
+            {savingConfig ? 'Saving…' : 'Save settings'}
+          </button>
+        </div>
       )}
     </div>
   )

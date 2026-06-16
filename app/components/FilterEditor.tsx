@@ -12,7 +12,7 @@ import type { FilterRule, FilterConfig } from '@/app/filters/actions'
 // passes these, the metafield field becomes a pick-list instead of free text;
 // without them the free-text `namespace.key` input is kept (back-compat for the
 // feed Filters page and the legacy scope panel).
-export type MetafieldOption = { namespace: string; key: string; count: number }
+export type MetafieldOption = { namespace: string; key: string; count: number; name?: string }
 
 export const FILTER_FIELDS = [
   { value: 'title', label: 'Title' },

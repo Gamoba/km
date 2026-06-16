@@ -53,7 +53,13 @@ export type OptimizerProduct = {
 export type OptimizerConfig = {
   charLimit: number // Google Merchant Center max title length (default 150)
   targetLanguage: string // human-readable language name, from the feed's market
-  fewShotExamples: string // user-authored "perfect" titles (fills the prompt)
+  fewShotExamples: string // "perfect" titles (fills the prompt). For a bucket run
+  // these are the bucket's APPROVED workshop examples; for the legacy feed run,
+  // the feed-level few-shot text.
+  // Optional bucket-scoped context — set only on a bucket run (the feed-level run
+  // leaves them undefined, so its prompt is unchanged):
+  instructions?: string // the bucket's free-text curator instructions
+  inputFields?: string[] // prioritised "include if present" field tokens
   model?: string // override for testing; defaults to MODEL
   temperature?: number // override; defaults to TEMPERATURE
 }
@@ -228,6 +234,26 @@ export function sourceHash(product: OptimizerProduct): string {
 // goes in the user message. Target language is also in the user message for the
 // same reason (so feeds in different languages share one cache entry).
 export function buildSystemPrompt(config: OptimizerConfig): string {
+  // Per-bucket curator instructions (optional — the feed-level run omits it).
+  const instructionsBlock = config.instructions?.trim()
+    ? `\n\n# Curator's instructions for this bucket\n${config.instructions.trim()}`
+    : ''
+
+  // Prioritised "include if present" wish list (optional). Tokens are normalised
+  // to match the product-data keys the user message sends: `metafield:ns.key` →
+  // `ns.key`; standard tokens (vendor, product_type, …) already match.
+  const fields = config.inputFields ?? []
+  const wishListBlock = fields.length
+    ? `\n\n# Desired information — most important first
+Include these attributes in the title when they help, in this priority order. Each token matches a key in the product data. Include each ONLY if it is present for that product; if it is missing, simply skip it — NEVER invent it. When space is tight (the character limit), keep the higher-priority ones and drop the lower-priority ones:
+${fields.map((f, i) => `${i + 1}. ${f.startsWith('metafield:') ? f.slice('metafield:'.length) : f}`).join('\n')}`
+    : ''
+
+  // Few-shot examples (optional — omit the whole section when there are none).
+  const examplesBlock = config.fewShotExamples.trim()
+    ? `\n\n# Examples of good titles\n${config.fewShotExamples.trim()}`
+    : ''
+
   return `You are a product title optimizer for Google Shopping feeds. Rewrite a product's title so it ranks well in Google Shopping search and matches how real shoppers search — while staying 100% truthful to the source data.
 
 # Title rules
@@ -242,10 +268,7 @@ export function buildSystemPrompt(config: OptimizerConfig): string {
 - Use ONLY attributes explicitly present in the provided product data.
 - NEVER invent or guess an attribute (vintage, volume, material, region, ABV, etc.). If it is not in the data, leave it out.
 - NEVER add a bottle size, volume, or measurement (ml, cl, l, kg, g) unless that exact value is in the data — do not assume a default like 750ml.
-- If data is thin, produce a SHORTER but accurate title rather than padding with assumptions.
-
-# Examples of good titles
-${config.fewShotExamples}
+- If data is thin, produce a SHORTER but accurate title rather than padding with assumptions.${instructionsBlock}${wishListBlock}${examplesBlock}
 
 # Output — return ONLY valid JSON, no preamble:
 Also return "source_values": the specific factual values you took from the product data and placed in the title (brand, producer, grape, region, country, vintage, volume, model, etc.), written EXACTLY as they appear in the product data — in the source language, NOT translated. Do not list the generic product type or any word you translated or inferred.

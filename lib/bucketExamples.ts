@@ -47,11 +47,16 @@ export const STRATEGIES: { id: string; description: string }[] = [
   { id: 'search_intent', description: 'phrased the way shoppers actually search — search-intent keywords first' },
   { id: 'spec_heavy', description: 'specification-heavy — key attributes (vintage, region, grape, model) front-loaded' },
   { id: 'concise', description: 'short and precise — brand and core identity/appellation only' },
+  // Format variation: a hyphen separator structures long titles. Placed among the
+  // first five so a single round's spread spans formats (spaces, hyphen, short,
+  // spec-heavy) rather than waiting for a later round.
+  { id: 'hyphen_separated', description: 'hyphen-structured for readability — group the primary specs (e.g. brand/appellation + vintage) first, then secondary specs (e.g. producer) after a plain hyphen "-", e.g. "Nebbiolo Ghemme 1999 - Antichi Vigneti di Cantalupo"; still pure specs separated by the hyphen, NEVER connective words ("from", "by", "with")' },
   { id: 'attribute_rich', description: 'long and attribute-rich — include every available wished-for attribute' },
   { id: 'brand_vintage', description: 'brand- and vintage-centred — producer + year lead the title' },
   { id: 'category_first', description: 'product type / category leads, then brand and attributes' },
   { id: 'region_first', description: 'origin/appellation/region leads, then producer and attributes' },
   { id: 'varietal_first', description: 'grape variety / model / material leads, then brand and origin' },
+  { id: 'title_case', description: 'same specs, normalised to consistent Title Case so ALL-CAPS source values (e.g. shouty producer names) read evenly — reformats casing only, adds/removes/translates nothing' },
 ]
 
 // Picks `count` DISTINCT strategy ids for a round, preferring ones NOT already in
@@ -92,6 +97,8 @@ export type BucketTitleConfig = {
 export type GeneratedCandidate = BucketExample & { validation: ValidationResult }
 
 export type GenerateResult = {
+  // All candidates in one round share a single product_ref — they are the SAME
+  // product titled with different strategies, for a clean strategy comparison.
   candidates: GeneratedCandidate[]
   // Unused members remaining after this round (members with no example row yet).
   // Approximate — counts members regardless of field-eligibility — so the UI can
@@ -158,6 +165,18 @@ export async function listBucketExamples(bucketId: string): Promise<BucketExampl
     if (b.status === 'approved') return 1
     return b.created_at.localeCompare(a.created_at)
   })
+}
+
+// Current (source) title of one product, by ref — for the workshop's round
+// header ("same product, five ways"). Returns '' if the product isn't found.
+export async function getProductCurrentTitle(feedId: string, productRef: string): Promise<string> {
+  const { data } = await db()
+    .from('products')
+    .select('title')
+    .eq('feed_id', feedId)
+    .eq('shopify_id', productRef)
+    .maybeSingle()
+  return (data?.title as string | undefined) ?? ''
 }
 
 // Smallest free approved slot in [0, max). Pure so it's unit-testable.
@@ -309,10 +328,10 @@ ${instructions.trim() || '(none provided — apply the general rules above)'}
 You generate several candidates at once. Each candidate MUST use a DIFFERENT strategy from this list — never repeat a strategy within one response. Vary the approach to building the title, not just the wording:
 ${STRATEGIES.map((s) => `- ${s.id}: ${s.description}`).join('\n')}
 
-# Output — return ONLY a JSON array, no preamble. One object per product, echoing its product_ref:
+# Output — return ONLY a JSON array, no preamble. One object per candidate — ALL candidates are for the one product, so every object echoes that SAME product_ref:
 [{ "product_ref": "...", "approach": "<one strategy id from the list>", "rationale": "<one short sentence>", "title": "...", "source_values": ["..."] }]
 - "approach": the strategy id you applied — must be one from the list above, and DISTINCT across the array.
-- "rationale": one short sentence in ${targetLanguage} describing how this title is built. It must NEVER justify an attribute that is not in the product's data.
+- "rationale": one short sentence in ENGLISH (always English, regardless of the title's language — it is an internal note for the human curator and NEVER appears in the feed) describing how the ${targetLanguage} title is built. It must NEVER justify an attribute that is not in the product's data.
 - "source_values": the factual values you took from the product data and placed in the title, written EXACTLY as they appear in the data, in the source language (NOT translated). Do not list the generic product type or any inferred/translated word.`
 }
 
@@ -370,7 +389,9 @@ export function buildDivergenceBlock(examples: BucketExample[]): string {
 // Builds the message for a round: a single user turn carrying the divergence
 // signal (when there are approved examples) plus the ask. Strategies are ASSIGNED
 // (one per candidate) so the round's distinctness is guaranteed structurally, not
-// left to the model. The taxonomy + output format live in the cached system
+// left to the model. All candidates are titled on the SAME single product so the
+// curator compares strategies, not products — `payloads` carries that one product
+// (single-element list). The taxonomy + output format live in the cached system
 // prompt. messages[0] is a user turn.
 export function buildWorkshopMessages(
   examples: BucketExample[],
@@ -381,22 +402,25 @@ export function buildWorkshopMessages(
   const divergence = buildDivergenceBlock(examples)
   const ask =
     (divergence ? `${divergence}\n` : '') +
-    `Produce exactly ${strategies.length} candidate titles — one per product. Use these ${strategies.length} strategies, EXACTLY ONE candidate per strategy, applying each to a different product: ${strategies.join(', ')}. Set each candidate's "approach" to the strategy you used. Target language: ${targetLanguage}.\nProducts: ${JSON.stringify(payloads)}`
+    `Produce exactly ${strategies.length} candidate titles, ALL for the SAME single product below — one title per strategy, EXACTLY ONE candidate per strategy: ${strategies.join(', ')}. Every candidate must echo the product's product_ref and set its "approach" to the strategy used. Target language: ${targetLanguage}.\nProduct: ${JSON.stringify(payloads[0] ?? null)}`
   return [{ role: 'user', content: ask }]
 }
 
-// Generates one round = up to APPROACHES_PER_ROUND (5) candidates, each a NEW
-// product titled with a DISTINCT strategy, and persists them as 'candidate' rows.
-// First resolves any leftover candidates from the previous round to 'rejected'
-// (the curator moved on without picking them — implicit "not these"), so only the
-// current round's candidates are live. Replays the APPROVED examples as covered
-// ground so the model diverges instead of converging.
+// Generates one round = up to APPROACHES_PER_ROUND (5) candidates, ALL titled on
+// ONE single product with DISTINCT strategies, and persists them as 'candidate'
+// rows. Titling the same product means the curator compares the STRATEGY, not the
+// product. First resolves any leftover candidates from the previous round to
+// 'rejected' (the curator moved on without picking them — implicit "not these"),
+// so only the current round's candidates are live. Replays the APPROVED examples
+// as covered ground so the model diverges instead of converging.
+//
+// The chosen product gets APPROACHES_PER_ROUND example rows (all sharing its
+// product_ref), so it lands in `usedRefs` and the NEXT round automatically picks a
+// fresh product — no extra round-to-round bookkeeping needed.
 export async function generateBucketCandidates(
   feedId: string,
   bucketId: string
 ): Promise<GenerateResult> {
-  const want = APPROACHES_PER_ROUND
-
   // Previous round's un-chosen candidates → rejected (implicit "not these").
   await db()
     .from('bucket_examples')
@@ -420,10 +444,11 @@ export async function generateBucketCandidates(
   const usedRefs = new Set(examples.map((e) => e.product_ref))
   const candidateRefs = memberRefs.filter((r) => !usedRefs.has(r))
 
-  // Collect eligible products (enough data for a meaningful title), stopping at
-  // `want`. Fields are a wish list now — a missing one no longer disqualifies.
-  const eligible: SupabaseProduct[] = []
-  for (let i = 0; i < candidateRefs.length && eligible.length < want; i += IN_CHUNK) {
+  // Pick the FIRST eligible product (membership order) — deterministic and not yet
+  // used. Fields are a wish list: a missing one no longer disqualifies. The whole
+  // round titles this one product.
+  let product: SupabaseProduct | null = null
+  for (let i = 0; i < candidateRefs.length && !product; i += IN_CHUNK) {
     const slice = candidateRefs.slice(i, i + IN_CHUNK)
     const { data, error } = await db()
       .from('products')
@@ -431,31 +456,38 @@ export async function generateBucketCandidates(
       .eq('feed_id', feedId)
       .in('shopify_id', slice)
     if (error) throw new Error(`Products failed: ${error.message}`)
-    for (const p of (data ?? []) as SupabaseProduct[]) {
-      if (eligible.length >= want) break
-      if (productHasEnoughData(p, config.input_fields, marketUrl)) eligible.push(p)
+    // Preserve membership order within the slice (the .in() result order isn't
+    // guaranteed) so "first eligible" is stable.
+    const bySlice = new Map(((data ?? []) as SupabaseProduct[]).map((p) => [p.shopify_id, p]))
+    for (const ref of slice) {
+      const p = bySlice.get(ref)
+      if (p && productHasEnoughData(p, config.input_fields, marketUrl)) {
+        product = p
+        break
+      }
     }
   }
 
-  if (eligible.length === 0) {
+  if (!product) {
     throw new Error(
       'Ingen egnede produkter tilbage at generere kandidater fra (medlemmer der ikke allerede er brugt og har en titel + mindst én attribut).'
     )
   }
 
-  const payloads = eligible.map((p) => buildProductPayload(p, config.input_fields, marketUrl))
+  const payload = buildProductPayload(product, config.input_fields, marketUrl)
   const systemPrompt = buildWorkshopSystemPrompt(config.instructions, charLimit, targetLanguage, config.input_fields)
   // Assign one distinct strategy per candidate, preferring approaches not already
   // approved (fresh-first), so the round is structurally distinct and divergent.
   const coveredApproaches = examples.filter((e) => e.status === 'approved').map((e) => e.approach)
-  const strategies = pickRoundStrategies(coveredApproaches, eligible.length)
-  const messages = buildWorkshopMessages(examples, payloads, strategies, targetLanguage)
+  const strategies = pickRoundStrategies(coveredApproaches, APPROACHES_PER_ROUND)
+  const messages = buildWorkshopMessages(examples, [payload], strategies, targetLanguage)
 
   const client: Anthropic = createOptimizerClient()
   const msg = await client.messages.create({
     model: MODEL,
-    // Each candidate now carries a rationale on top of the title, so give more room.
-    max_tokens: Math.min(200 * eligible.length + 300, 4096),
+    // One title + rationale per strategy, all for the one product — size by the
+    // number of strategies asked for, not the (single) product.
+    max_tokens: Math.min(200 * strategies.length + 300, 4096),
     temperature: TEMPERATURE,
     system: [{ type: 'text', text: systemPrompt, cache_control: { type: 'ephemeral' } }],
     messages,
@@ -465,11 +497,11 @@ export async function generateBucketCandidates(
   const parsed = parseCandidatesArray(block.text)
   if (!parsed) throw new Error('Kunne ikke parse modellens JSON-svar')
 
-  // Match each candidate to its product (by echoed ref, else positionally), run
-  // grounding validation, and persist as candidate rows.
-  const byRef = new Map(eligible.map((p) => [p.shopify_id, p]))
-  // One candidate per product — dedupe in case the model echoes a ref twice.
-  const usedProducts = new Set<string>()
+  // All candidates are for the one product. Run grounding validation and persist
+  // as candidate rows, keeping at most one per DISTINCT approach (the round's
+  // structural distinctness) and capping at APPROACHES_PER_ROUND.
+  const op = toOptimizerProduct(product)
+  const seenApproaches = new Set<string>()
   const rows: {
     feed_id: string
     bucket_id: string
@@ -480,11 +512,14 @@ export async function generateBucketCandidates(
     rationale: string
   }[] = []
   const validations: ValidationResult[] = []
-  parsed.forEach((c, i) => {
-    const product = (c.product_ref && byRef.get(c.product_ref)) || eligible[i]
-    if (!product || !c.title || usedProducts.has(product.shopify_id)) return
-    usedProducts.add(product.shopify_id)
-    const op = toOptimizerProduct(product)
+  for (const c of parsed) {
+    if (rows.length >= APPROACHES_PER_ROUND) break
+    if (!c.title) continue
+    // Dedupe by approach so two candidates don't collapse the round; an empty
+    // approach label is kept (uniquely) rather than dropped.
+    const approachKey = c.approach || `__blank_${rows.length}`
+    if (seenApproaches.has(approachKey)) continue
+    seenApproaches.add(approachKey)
     const validation = validateResult({ title: c.title, source_values: c.source_values }, op, {
       charLimit,
       targetLanguage,
@@ -500,7 +535,7 @@ export async function generateBucketCandidates(
       rationale: c.rationale,
     })
     validations.push(validation)
-  })
+  }
 
   if (rows.length === 0) throw new Error('Modellen returnerede ingen brugbare kandidater')
 
@@ -518,5 +553,7 @@ export async function generateBucketCandidates(
     validation: validations[i] ?? { ok: true, issues: [] },
   }))
 
-  return { candidates, unusedMembersAfter: Math.max(0, candidateRefs.length - candidates.length) }
+  // One member consumed this round → it now has rows and drops out of the unused
+  // pool. (All candidates share that one product, so don't subtract their count.)
+  return { candidates, unusedMembersAfter: Math.max(0, candidateRefs.length - 1) }
 }

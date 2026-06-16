@@ -49,7 +49,10 @@
       "PowerShell(npx tsx scripts/workshop-cli.ts reset; npx tsx scripts/workshop-cli.ts gen)",
       "PowerShell(npx tsx scripts/workshop-cli.ts approve 8dd3a5ac 4023ec88; npx tsx scripts/workshop-cli.ts gen)",
       "PowerShell(npx tsx scripts/workshop-cli.ts approve 2395b0f1 be16bf07; npx tsx scripts/workshop-cli.ts gen)",
-      "PowerShell(npx eslint lib/bucketExamples.ts app/optimize/actions.ts app/optimize/BucketWorkshopTab.tsx scripts/verify-bucket-examples.ts scripts/workshop-cli.ts)"
+      "PowerShell(npx eslint lib/bucketExamples.ts app/optimize/actions.ts app/optimize/BucketWorkshopTab.tsx scripts/verify-bucket-examples.ts scripts/workshop-cli.ts)",
+      "Read(//c/Users/kenne/AppData/Local/Temp/claude/C--Users-kenne-km-product-feed-generator/b2ab0fa5-b858-447a-9e4c-2e69d6d99ada/tasks/**)",
+      "Bash(break)",
+      "PowerShell($p = \\(Get-NetTCPConnection -LocalPort 3000 -State Listen -ErrorAction SilentlyContinue\\).OwningProcess; if \\($p\\) { Stop-Process -Id $p -Force; \"stopped dev server \\(pid $p\\)\" } else { \"no listener on 3000\" })"
     ]
   }
 }

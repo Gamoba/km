@@ -1,23 +1,37 @@
 'use client'
 
-import { useState } from 'react'
+// Bucket editor as a guided step-flow: Scope → Examples → Run. Steps are freely
+// navigable (click the indicator, or Back/Next) — not a locked wizard — but the
+// order communicates the intended path. Review is kept as a trailing step for
+// now; the next phase merges Run + Review into a single "Run → Results" view,
+// at which point the flow becomes the canonical three steps.
+
+import { Fragment, useEffect, useState } from 'react'
 import Link from 'next/link'
-import { setBucketMethod } from './actions'
+import { getBucketMembership } from './actions'
 import { BucketScopeTab } from './BucketScopeTab'
 import { BucketRunTab } from './BucketRunTab'
-import { BucketRulesTab } from './BucketRulesTab'
 import { BucketWorkshopTab } from './BucketWorkshopTab'
+import { BucketResultsPanel } from './BucketResultsPanel'
+import { BucketCustomLabelPanel } from './BucketCustomLabelPanel'
 import type { FilterConfig } from '@/app/filters/actions'
-import type { BucketMethod } from '@/lib/optimizationBuckets'
 
-type Tab = 'scope' | 'examples' | 'run' | 'rules'
+type Step = 'scope' | 'examples' | 'run'
+
+// The three canonical steps. The Run step also hosts the Results view (run +
+// review merged), so there is no separate Review step.
+const FLOW: { id: Step; label: string }[] = [
+  { id: 'scope', label: 'Scope' },
+  { id: 'examples', label: 'Examples' },
+  { id: 'run', label: 'Run' },
+]
+const ORDER: Step[] = ['scope', 'examples', 'run']
 
 export function BucketEditorClient({
   feedId,
   feedName,
   bucketId,
   bucketName,
-  initialMethod,
   initialInclude,
   initialExclude,
 }: {
@@ -25,32 +39,38 @@ export function BucketEditorClient({
   feedName: string
   bucketId: string
   bucketName: string
-  initialMethod: BucketMethod
   initialInclude: FilterConfig
   initialExclude: FilterConfig
 }) {
-  const [method, setMethod] = useState<BucketMethod>(initialMethod)
-  const [tab, setTab] = useState<Tab>('scope')
-  const [methodError, setMethodError] = useState<string | null>(null)
+  const [step, setStep] = useState<Step>('scope')
+  // Membership count drives the soft "set scope first" gate. null = still loading.
+  const [memberCount, setMemberCount] = useState<number | null>(null)
+  // Bumped after a run so the Results panel reloads with the new titles.
+  const [resultsKey, setResultsKey] = useState(0)
 
-  async function changeMethod(m: BucketMethod) {
-    setMethod(m) // optimistic
-    if (m === 'auto' && tab === 'rules') setTab('scope')
-    const r = await setBucketMethod(feedId, bucketId, m)
-    if (r.error) {
-      setMethodError(r.error)
-      setMethod((prev) => (prev === m ? initialMethod : prev))
-    } else {
-      setMethodError(null)
+  useEffect(() => {
+    let cancelled = false
+    getBucketMembership(feedId, bucketId).then((r) => {
+      if (!cancelled && 'data' in r) setMemberCount(r.data.length)
+    })
+    return () => {
+      cancelled = true
     }
-  }
+  }, [feedId, bucketId])
 
-  const tabBtn = (value: Tab, label: string) => {
-    const isActive = tab === value
+  const noMembers = memberCount === 0
+  const activeIndex = FLOW.findIndex((s) => s.id === step) // -1 while on Review
+  const orderIndex = ORDER.indexOf(step)
+  const prev = orderIndex > 0 ? ORDER[orderIndex - 1] : null
+  const next = orderIndex < ORDER.length - 1 ? ORDER[orderIndex + 1] : null
+
+  const stepChip = (id: Step, label: string, n: number | null, done: boolean) => {
+    const isActive = step === id
     return (
       <button
         type="button"
-        onClick={() => setTab(value)}
+        onClick={() => setStep(id)}
+        className="flex items-center gap-1.5"
         style={{
           padding: '4px 12px',
           fontSize: '11px',
@@ -60,6 +80,22 @@ export function BucketEditorClient({
           color: isActive ? '#ffffff' : 'var(--color-text-tertiary)',
         }}
       >
+        {n !== null && (
+          <span
+            className="flex items-center justify-center"
+            style={{
+              width: '16px',
+              height: '16px',
+              borderRadius: '50%',
+              fontSize: '9px',
+              fontWeight: 700,
+              background: isActive ? 'rgba(255,255,255,0.25)' : done ? 'var(--color-accent)' : 'var(--color-border-tertiary)',
+              color: isActive || done ? '#ffffff' : 'var(--color-text-tertiary)',
+            }}
+          >
+            {done && !isActive ? '✓' : n}
+          </span>
+        )}
         {label}
       </button>
     )
@@ -75,30 +111,59 @@ export function BucketEditorClient({
           <h1 className="ff-topbar-title">
             {feedName} · {bucketName}
           </h1>
-          <div className="flex gap-1">
-            {tabBtn('scope', 'Scope')}
-            {tabBtn('examples', 'Examples')}
-            {tabBtn('run', 'Run')}
-            {method === 'rule_based' && tabBtn('rules', 'Rules')}
+          <div className="flex items-center gap-1">
+            {FLOW.map((s, i) => (
+              <Fragment key={s.id}>
+                {i > 0 && <span style={{ fontSize: '11px', color: 'var(--color-text-tertiary)' }}>›</span>}
+                {stepChip(s.id, s.label, i + 1, activeIndex > i)}
+              </Fragment>
+            ))}
           </div>
         </div>
-        <div className="flex items-center gap-2">
-          {methodError && <span style={{ fontSize: '11px', color: 'var(--color-badge-danger-text)' }}>{methodError}</span>}
-          <label className="ff-label" style={{ margin: 0 }}>Method</label>
-          <select value={method} onChange={(e) => changeMethod(e.target.value as BucketMethod)} className="ff-select w-40">
-            <option value="auto">Automatic</option>
-            <option value="rule_based">Rule-based</option>
-          </select>
-        </div>
+        {memberCount !== null && (
+          <div style={{ fontSize: '11px', color: 'var(--color-text-tertiary)' }}>
+            {memberCount} {memberCount === 1 ? 'product' : 'products'}
+          </div>
+        )}
       </header>
 
-      <main className="px-4 py-4 max-w-4xl">
-        {tab === 'scope' && (
+      <main className="px-4 py-4 max-w-6xl">
+        {/* Soft gate: a gentle nudge, never a hard block. Run shows its own too. */}
+        {noMembers && step === 'examples' && (
+          <p className="mb-3" style={{ fontSize: '11px', color: 'var(--color-text-tertiary)' }}>
+            This bucket has no products yet — set its scope first (step 1) so the workshop has products to draw from.
+          </p>
+        )}
+
+        {step === 'scope' && (
           <BucketScopeTab feedId={feedId} bucketId={bucketId} initialInclude={initialInclude} initialExclude={initialExclude} />
         )}
-        {tab === 'examples' && <BucketWorkshopTab feedId={feedId} bucketId={bucketId} />}
-        {tab === 'run' && <BucketRunTab feedId={feedId} bucketId={bucketId} />}
-        {tab === 'rules' && method === 'rule_based' && <BucketRulesTab feedId={feedId} bucketId={bucketId} />}
+        {step === 'examples' && <BucketWorkshopTab feedId={feedId} bucketId={bucketId} />}
+        {step === 'run' && (
+          <div className="space-y-3">
+            <BucketRunTab feedId={feedId} bucketId={bucketId} onRunComplete={() => setResultsKey((k) => k + 1)} />
+            <BucketCustomLabelPanel feedId={feedId} bucketId={bucketId} />
+            <BucketResultsPanel feedId={feedId} bucketId={bucketId} reloadKey={resultsKey} />
+          </div>
+        )}
+
+        {/* Guided back/next — free movement, order is just a suggestion. */}
+        <div className="flex items-center justify-between pt-4">
+          <button
+            type="button"
+            onClick={() => prev && setStep(prev)}
+            disabled={!prev}
+            className="ff-btn-secondary"
+            style={{ opacity: prev ? 1 : 0.4 }}
+          >
+            ← Back
+          </button>
+          {next && (
+            <button type="button" onClick={() => setStep(next)} className="ff-btn-secondary">
+              Next: {FLOW.find((s) => s.id === next)?.label} →
+            </button>
+          )}
+        </div>
       </main>
     </div>
   )

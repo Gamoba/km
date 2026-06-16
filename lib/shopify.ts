@@ -1,4 +1,4 @@
-const API_VERSION = '2025-07'
+export const API_VERSION = '2025-07'
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))

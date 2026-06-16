@@ -467,6 +467,65 @@ export async function setBucketMembership(
   }
 }
 
+// ── Manual membership (additive to the filter) ───────────────────────────────
+
+export async function getBucketManualProducts(
+  feedId: string,
+  bucketId: string
+): Promise<{ data: { product_ref: string; title: string }[] } | { error: string }> {
+  const g = await requireOwnedBucket(feedId, bucketId)
+  if ('error' in g) return g
+  try {
+    return { data: await buckets.getBucketManualProducts(feedId, bucketId) }
+  } catch (e) {
+    return { error: (e as Error).message }
+  }
+}
+
+export async function addManualBucketProducts(
+  feedId: string,
+  bucketId: string,
+  refs: string[]
+): Promise<{ error?: string }> {
+  const g = await requireOwnedBucket(feedId, bucketId)
+  if ('error' in g) return g
+  try {
+    await buckets.addManualProducts(feedId, bucketId, refs)
+    return {}
+  } catch (e) {
+    return { error: (e as Error).message }
+  }
+}
+
+export async function removeManualBucketProduct(
+  feedId: string,
+  bucketId: string,
+  ref: string
+): Promise<{ error?: string }> {
+  const g = await requireOwnedBucket(feedId, bucketId)
+  if ('error' in g) return g
+  try {
+    await buckets.removeManualProduct(feedId, bucketId, ref)
+    return {}
+  } catch (e) {
+    return { error: (e as Error).message }
+  }
+}
+
+// Feed-level product search for the manual-add picker (no bucketId needed).
+export async function searchFeedProducts(
+  feedId: string,
+  query: string
+): Promise<{ data: { product_ref: string; title: string; vendor: string | null; image_url: string | null }[] } | { error: string }> {
+  const g = await requireOwnedFeed(feedId)
+  if ('error' in g) return g
+  try {
+    return { data: await buckets.searchFeedProducts(feedId, query) }
+  } catch (e) {
+    return { error: (e as Error).message }
+  }
+}
+
 // ── Run / preview ────────────────────────────────────────────────────────────
 
 export async function planBucketRun(
@@ -506,6 +565,125 @@ export async function previewBucket(
   if ('error' in g) return g
   try {
     return { data: await buckets.previewBucket(feedId, bucketId, limit) }
+  } catch (e) {
+    return { error: (e as Error).message }
+  }
+}
+
+// ── Custom labels (split-testing) ────────────────────────────────────────────
+
+export async function getBucketCustomLabel(
+  feedId: string,
+  bucketId: string
+): Promise<{ data: { index: number | null; value: string; conflicts: number[] } } | { error: string }> {
+  const g = await requireOwnedBucket(feedId, bucketId)
+  if ('error' in g) return g
+  try {
+    const [bucket, conflicts] = await Promise.all([
+      buckets.getBucket(feedId, bucketId),
+      buckets.getFeedCustomLabelConflicts(feedId),
+    ])
+    return {
+      data: {
+        index: bucket?.custom_label_index ?? null,
+        value: bucket?.custom_label_value ?? '',
+        conflicts,
+      },
+    }
+  } catch (e) {
+    return { error: (e as Error).message }
+  }
+}
+
+export async function setBucketCustomLabel(
+  feedId: string,
+  bucketId: string,
+  index: number | null,
+  value: string | null
+): Promise<{ error?: string }> {
+  const g = await requireOwnedBucket(feedId, bucketId)
+  if ('error' in g) return g
+  try {
+    await buckets.setBucketCustomLabel(feedId, bucketId, index, value)
+    return {}
+  } catch (e) {
+    return { error: (e as Error).message }
+  }
+}
+
+// ── Results (whole bucket + optimization state) ──────────────────────────────
+
+export async function listBucketResults(
+  feedId: string,
+  bucketId: string
+): Promise<{ data: svc.ResultItem[] } | { error: string }> {
+  const g = await requireOwnedBucket(feedId, bucketId)
+  if ('error' in g) return g
+  try {
+    return { data: await svc.listBucketResults(feedId, bucketId) }
+  } catch (e) {
+    return { error: (e as Error).message }
+  }
+}
+
+export async function getBucketProductDetail(
+  feedId: string,
+  bucketId: string,
+  productRef: string
+): Promise<{ data: svc.ProductDetail } | { error: string }> {
+  const g = await requireOwnedBucket(feedId, bucketId)
+  if ('error' in g) return g
+  try {
+    return { data: await svc.getBucketProductDetail(feedId, productRef) }
+  } catch (e) {
+    return { error: (e as Error).message }
+  }
+}
+
+// ── Review (needs_review queue) ──────────────────────────────────────────────
+
+export async function listBucketReview(
+  feedId: string,
+  bucketId: string
+): Promise<{ data: svc.ReviewItem[] } | { error: string }> {
+  const g = await requireOwnedBucket(feedId, bucketId)
+  if ('error' in g) return g
+  try {
+    return { data: await svc.listBucketReview(feedId, bucketId) }
+  } catch (e) {
+    return { error: (e as Error).message }
+  }
+}
+
+// Accept (with the proposed title) or save an edited title for a reviewed
+// product — both are human overrides → status 'human_edited'.
+export async function saveBucketReviewTitle(
+  feedId: string,
+  bucketId: string,
+  productRef: string,
+  title: string
+): Promise<{ error?: string }> {
+  const g = await requireOwnedBucket(feedId, bucketId)
+  if ('error' in g) return g
+  try {
+    await svc.saveManualTitle(feedId, productRef, title)
+    return {}
+  } catch (e) {
+    return { error: (e as Error).message }
+  }
+}
+
+// Reject a proposal — lock the product to its original title.
+export async function rejectBucketReview(
+  feedId: string,
+  bucketId: string,
+  productRef: string
+): Promise<{ error?: string }> {
+  const g = await requireOwnedBucket(feedId, bucketId)
+  if ('error' in g) return g
+  try {
+    await svc.rejectOptimization(feedId, productRef)
+    return {}
   } catch (e) {
     return { error: (e as Error).message }
   }
@@ -562,6 +740,22 @@ export async function generateBucketCandidates(
   if ('error' in g) return g
   try {
     return { data: await workshop.generateBucketCandidates(feedId, bucketId) }
+  } catch (e) {
+    return { error: (e as Error).message }
+  }
+}
+
+// Current (source) title of a product — for the workshop's round header showing
+// the one product all five candidates are titled from.
+export async function getProductCurrentTitle(
+  feedId: string,
+  bucketId: string,
+  productRef: string
+): Promise<{ data: string } | { error: string }> {
+  const g = await requireOwnedBucket(feedId, bucketId)
+  if ('error' in g) return g
+  try {
+    return { data: await workshop.getProductCurrentTitle(feedId, productRef) }
   } catch (e) {
     return { error: (e as Error).message }
   }

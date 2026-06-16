@@ -8,7 +8,15 @@ import type { OverlapSummary } from '@/lib/titleOptimizationScope'
 
 const CHUNK = 10
 
-export function BucketRunTab({ feedId, bucketId }: { feedId: string; bucketId: string }) {
+export function BucketRunTab({
+  feedId,
+  bucketId,
+  onRunComplete,
+}: {
+  feedId: string
+  bucketId: string
+  onRunComplete?: () => void
+}) {
   const [error, setError] = useState<string | null>(null)
 
   const [summary, setSummary] = useState<OverlapSummary | null>(null)
@@ -22,7 +30,6 @@ export function BucketRunTab({ feedId, bucketId }: { feedId: string; bucketId: s
   const [includeHumanEdited, setIncludeHumanEdited] = useState(false)
   const [running, setRunning] = useState(false)
   const [progress, setProgress] = useState({ done: 0, total: 0 })
-  const [runResults, setRunResults] = useState<OptimizationOutcome[]>([])
 
   // Membership summary on mount — setState only in the async callback.
   useEffect(() => {
@@ -57,7 +64,6 @@ export function BucketRunTab({ feedId, bucketId }: { feedId: string; bucketId: s
   async function handleRun() {
     setError(null)
     setRunning(true)
-    setRunResults([])
     setProgress({ done: 0, total: 0 })
 
     const plan = await planBucketRun(feedId, bucketId, { rerun, includeHumanEdited })
@@ -73,20 +79,18 @@ export function BucketRunTab({ feedId, bucketId }: { feedId: string; bucketId: s
       return
     }
 
-    const all: OptimizationOutcome[] = []
     for (let i = 0; i < targets.length; i += CHUNK) {
       const res = await runBucketRefs(feedId, bucketId, targets.slice(i, i + CHUNK))
       if ('error' in res) {
         setError(res.error)
         break
       }
-      all.push(...res.data)
-      setRunResults([...all])
       setProgress({ done: Math.min(i + CHUNK, targets.length), total: targets.length })
     }
 
     setRunning(false)
     refreshSummary()
+    onRunComplete?.() // let the Results panel reload with the freshly persisted titles
   }
 
   const noMembers = !loadingSummary && summary !== null && summary.inScope === 0
@@ -170,8 +174,6 @@ export function BucketRunTab({ feedId, bucketId }: { feedId: string; bucketId: s
           </button>
         </div>
       </div>
-
-      <OutcomeList title="Run results" outcomes={runResults} />
     </div>
   )
 }

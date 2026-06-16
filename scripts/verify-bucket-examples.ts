@@ -18,6 +18,7 @@ import {
   STRATEGIES,
   type BucketExample,
 } from '../lib/bucketExamples'
+import { buildSystemPrompt, type OptimizerConfig } from '../lib/titleOptimizer'
 import type { SupabaseProduct } from '../lib/sync'
 
 let passed = 0
@@ -106,6 +107,7 @@ console.log('buildWorkshopMessages')
   const firstRound = buildWorkshopMessages([], payloads, ['spec_heavy', 'concise'], 'Danish')
   check('always a single user turn', firstRound.length === 1 && firstRound[0].role === 'user')
   check('asks for exactly N and assigns the strategies', String(firstRound[0].content).includes('Produce exactly 2') && String(firstRound[0].content).includes('spec_heavy, concise'))
+  check('titles ONE shared product (same-product round)', String(firstRound[0].content).includes('SAME single product') && String(firstRound[0].content).includes('"product_ref":"1"'))
   check('first round has no divergence block', !String(firstRound[0].content).includes('covered ground'))
 
   const later = buildWorkshopMessages([ex({ status: 'approved', generated_title: 'Good', approach: 'concise', position: 0 })], payloads, ['spec_heavy', 'region_first'], 'Danish')
@@ -132,6 +134,35 @@ console.log('buildWorkshopSystemPrompt')
   check('renders the prioritised wish list', withFields.includes('Desired information'))
   check('lists fields in priority order', withFields.includes('1. vendor') && withFields.includes('2. metafield:custom.region') && withFields.includes('3. metafield:custom.drue'))
   check('keeps the include-if-present / never-invent framing', withFields.includes('ONLY if it is present') && withFields.includes('NEVER invent'))
+}
+
+console.log('buildSystemPrompt — step 5 bucket coupling')
+{
+  const base: OptimizerConfig = { charLimit: 150, targetLanguage: 'German', fewShotExamples: '' }
+
+  // Feed-style config (no bucket fields): none of the bucket blocks appear, but
+  // the core prompt is intact — the legacy feed run is unchanged.
+  const feed = buildSystemPrompt({ ...base, fewShotExamples: '- Some title' })
+  check('feed run: no curator-instructions block', !feed.includes("Curator's instructions for this bucket"))
+  check('feed run: no wish-list block', !feed.includes('Desired information'))
+  check('feed run: still grounded + title rules', feed.includes('# Grounding') && feed.includes('# Title rules'))
+  check('feed run: renders provided few-shot', feed.includes('# Examples of good titles') && feed.includes('- Some title'))
+
+  // Empty few-shot now omits the whole examples section (cleaner no-examples run).
+  check('no examples section when few-shot empty', !buildSystemPrompt(base).includes('# Examples of good titles'))
+
+  // Bucket run: instructions + prioritised fields + approved examples all land.
+  const bucket = buildSystemPrompt({
+    ...base,
+    instructions: 'Start every title with the vintage year.',
+    inputFields: ['metafield:custom.vintage', 'vendor', 'metafield:custom.region'],
+    fewShotExamples: '- 1999 Ghemme Antichi Vigneti\n- 1997 Gattinara Travaglini',
+  })
+  check('bucket run: embeds curator instructions', bucket.includes("Curator's instructions for this bucket") && bucket.includes('Start every title with the vintage year.'))
+  check('bucket run: renders prioritised wish list', bucket.includes('Desired information'))
+  check('bucket run: normalises metafield tokens to data keys', bucket.includes('1. custom.vintage') && bucket.includes('2. vendor') && bucket.includes('3. custom.region') && !bucket.includes('metafield:custom.vintage'))
+  check('bucket run: approved titles become the few-shot', bucket.includes('# Examples of good titles') && bucket.includes('- 1999 Ghemme Antichi Vigneti'))
+  check('bucket run: keeps include-if-present / never-invent framing', bucket.includes('ONLY if it is present') && bucket.includes('NEVER invent'))
 }
 
 console.log('productHasEnoughData (title + ≥1 structured attribute)')

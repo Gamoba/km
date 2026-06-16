@@ -31,7 +31,6 @@ export default async function BucketEditorPage({
       feedName={feed.name}
       bucketId={bucket.id}
       bucketName={bucket.name}
-      initialMethod={bucket.method}
       initialInclude={filters.include}
       initialExclude={filters.exclude}
     />
