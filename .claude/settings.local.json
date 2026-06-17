@@ -60,7 +60,10 @@
       "Bash(node --env-file=.env.local --import tsx /tmp/recon.ts)",
       "Bash(node --env-file=.env.local --import tsx /tmp/ab-multi.ts)",
       "Bash(git add *)",
-      "Bash(git commit -m ' *)"
+      "Bash(git commit -m ' *)",
+      "Bash(node --env-file=.env.local --import tsx _verify_login.ts)",
+      "Bash(node --env-file=.env.local --import tsx _inspect_users.ts)",
+      "Bash(git restore *)"
     ]
   }
 }
