@@ -35,6 +35,7 @@ export default async function FeedDetailPage({
     { data: cacheInfo },
     mappingsCountRes,
     { data: lastSyncRow },
+    optimizedCountRes,
   ] = await Promise.all([
     db.from('feed_settings').select('feed_mode').eq('feed_id', feedId).maybeSingle(),
     db
@@ -55,6 +56,12 @@ export default async function FeedDetailPage({
       .order('synced_at', { ascending: false })
       .limit(1)
       .maybeSingle(),
+    // Optimized-title count for the AI Titles card (rows with an applied title).
+    db
+      .from('product_title_optimizations')
+      .select('feed_id', { count: 'exact', head: true })
+      .eq('feed_id', feedId)
+      .not('optimized_title', 'is', null),
   ])
 
   // Auto-insert default feed_settings row if missing — keeps the invariant
@@ -86,6 +93,7 @@ export default async function FeedDetailPage({
       mappingCount={mappingsCountRes.count ?? 0}
       totalFields={TOTAL_GOOGLE_FIELDS}
       lastSynced={lastSyncRow?.synced_at ?? null}
+      optimizedCount={optimizedCountRes.count ?? 0}
     />
   )
 }

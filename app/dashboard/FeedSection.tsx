@@ -39,27 +39,29 @@ export function FeedSection({
   }
 
   return (
-    <div className="ff-panel">
-      <div className="ff-panel-header">Your feed</div>
+    <div className="wl-card">
+      <div style={{ padding: '14px 18px', borderBottom: '1px solid var(--hairline)' }}>
+        <span style={{ fontSize: '15px', fontWeight: 500, color: 'var(--ink)' }}>Your feed</span>
+      </div>
 
-      <div className="p-3.5 space-y-2">
+      <div className="p-4 space-y-2">
         <div className="flex gap-2">
           <code
             className="flex-1 min-w-0 px-2.5 py-1.5 truncate ff-mono"
             style={{
               fontSize: '11px',
-              background: 'var(--color-background-secondary)',
-              border: '1px solid var(--color-border-tertiary)',
-              borderRadius: '4px',
-              color: 'var(--color-text-secondary)',
+              background: 'var(--bg-surface)',
+              border: '1px solid var(--hairline)',
+              borderRadius: '8px',
+              color: 'var(--ink-muted)',
             }}
           >
             {origin ? feedUrl : `…/api/feed/generate/${feedId}`}
           </code>
-          <button onClick={copyUrl} className="ff-btn-secondary shrink-0">
+          <button onClick={copyUrl} className="wl-btn-secondary shrink-0">
             {copied ? 'Copied' : 'Copy URL'}
           </button>
-          <button onClick={onRegenerate} disabled={isRegenerating} className="ff-btn-primary shrink-0">
+          <button onClick={onRegenerate} disabled={isRegenerating} className="wl-btn-primary shrink-0">
             {isRegenerating ? 'Generating…' : 'Generate feed'}
           </button>
         </div>
@@ -69,7 +71,7 @@ export function FeedSection({
         )}
 
         {cacheInfo?.generated_at ? (
-          <p style={{ fontSize: '11px', color: 'var(--color-text-tertiary)' }}>
+          <p style={{ fontSize: '11px', color: 'var(--ink-muted)' }}>
             Last generated:{' '}
             {new Date(cacheInfo.generated_at).toLocaleString('en-US')}
             {cacheInfo.product_count != null && (
@@ -77,7 +79,7 @@ export function FeedSection({
             )}
           </p>
         ) : (
-          <p style={{ fontSize: '11px', fontStyle: 'italic', color: 'var(--color-text-tertiary)' }}>
+          <p style={{ fontSize: '11px', fontStyle: 'italic', color: 'var(--ink-muted)' }}>
             Feed has not been generated yet
           </p>
         )}

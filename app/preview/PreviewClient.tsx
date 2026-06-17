@@ -32,7 +32,17 @@ function FieldValue({ value }: { value: string | undefined }) {
     )
   }
   return (
-    <span className="break-all" style={{ fontSize: '11px', color: 'var(--color-text-primary)' }}>
+    <span
+      style={{
+        fontSize: '11px',
+        color: 'var(--color-text-primary)',
+        // Cap long values (e.g. the description) to a readable measure so they
+        // wrap at a comfortable line length instead of spanning the whole panel.
+        display: 'inline-block',
+        maxWidth: '640px',
+        wordBreak: 'break-word',
+      }}
+    >
       {value}
     </span>
   )

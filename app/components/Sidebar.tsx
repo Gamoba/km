@@ -24,7 +24,11 @@ const TOP_NAV = [
   { label: 'Projects', href: '/', icon: 'grid' },
 ] as const
 
-function active(pathname: string, href: string) {
+// `exact` is required for index-style items whose href is a PREFIX of their
+// siblings — e.g. the feed Overview at /feed/[id], which would otherwise light
+// up on every /feed/[id]/* sub-page via the startsWith match below.
+function active(pathname: string, href: string, exact = false) {
+  if (exact) return pathname === href
   if (href === '/') return pathname === '/'
   return pathname === href || pathname.startsWith(href + '/')
 }
@@ -182,8 +186,8 @@ export function Sidebar() {
     router.push('/login')
   }
 
-  const navLink = (href: string, icon: string, label: string) => {
-    const isActive = active(pathname, href)
+  const navLink = (href: string, icon: string, label: string, exact = false) => {
+    const isActive = active(pathname, href, exact)
     return (
       <Link
         key={href}
@@ -225,7 +229,10 @@ export function Sidebar() {
         const fullHref = item.href
           ? `/feed/${activeFeedId}/${item.href}`
           : `/feed/${activeFeedId}`
-        return navLink(fullHref, item.icon, item.label)
+        // Overview (empty href) is the feed root and a prefix of every sibling,
+        // so it must match exactly; the rest keep prefix matching (e.g. AI Titles
+        // stays active inside a bucket editor).
+        return navLink(fullHref, item.icon, item.label, item.href === '')
       })}
     </>
   ) : null

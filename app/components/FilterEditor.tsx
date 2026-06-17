@@ -14,6 +14,15 @@ import type { FilterRule, FilterConfig } from '@/app/filters/actions'
 // feed Filters page and the legacy scope panel).
 export type MetafieldOption = { namespace: string; key: string; count: number; name?: string }
 
+// Human-readable label for a metafield: the definition name when known
+// (e.g. "Årgang"), else the raw "namespace.key". Shopify can't store non-ASCII
+// in metafield keys, so a Danish field like "Årgang" lives under a mangled key
+// (custom._rgang) and the definition name is the only legible form.
+export function metafieldLabel(m: { namespace: string; key: string; name?: string }): string {
+  const name = m.name?.trim()
+  return name ? name : `${m.namespace}.${m.key}`
+}
+
 export const FILTER_FIELDS = [
   { value: 'title', label: 'Title' },
   { value: 'vendor', label: 'Vendor' },
@@ -121,7 +130,7 @@ function RuleRow({
             )}
             {metafieldOptions.map((m) => {
               const k = `${m.namespace}.${m.key}`
-              return <option key={k} value={k}>{k} ({m.count})</option>
+              return <option key={k} value={k}>{metafieldLabel(m)} ({m.count})</option>
             })}
           </select>
         ) : (

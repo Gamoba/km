@@ -36,6 +36,141 @@
   --color-badge-danger-text: #a32d2d;
   --color-badge-accent-bg: rgba(108, 92, 231, 0.1);
   --color-badge-accent-text: #534ab7;
+
+  /* ── FeedFlow design-system tokens (.claude/skills/feedflow-design) ─────────
+     Light, warm, airy. Neutral foundation; colour only as small accents. Added
+     alongside the legacy --color-* tokens so converted pages adopt it first. */
+  --bg-base: #fdfcfb;          /* primary page background, warm offwhite */
+  --bg-surface: #f4f3f0;       /* muted panels / sections */
+  --ink: #1a1a18;              /* primary text, warm near-black */
+  --ink-secondary: #57564f;    /* body / secondary text */
+  --ink-muted: #8a8980;        /* labels / hints */
+  --hairline: rgba(26, 26, 24, 0.1); /* fine card / row borders */
+  --dark-bg: #1e1e1a;          /* dark contrast bands / sidebar */
+
+  /* Semantic accents — small doses only (buttons, pills, dots, thin lines). */
+  --accent-purple: #7c5cfc;        /* brand: primary buttons, active nav, key numbers */
+  --accent-purple-hover: #6a49ea;
+  --accent-green: #1fb46a;         /* success / active / ok */
+  --accent-amber: #e8a317;         /* warning */
+  --accent-red: #e0524c;           /* error */
+
+  /* Soft tints for SMALL (~40px) icon-fields only — never large fills. Paired
+     with a dark (--ink) border: the small-field signature. */
+  --field-purple: #ddd3fe;
+  --field-amber: #fbe6a3;
+  --field-pink: #f9cce6;
+  --field-mint: #c2ead7;
+}
+
+/* ── FeedFlow design-system primitives ───────────────────────────────────────
+   Calm neutral cards on the warm base; colour lives only in small icon-fields,
+   pills and the single brand button. Flat — hairlines, no heavy boxes. */
+.wl-card {
+  background: #ffffff;
+  border: 1px solid var(--hairline);
+  border-radius: 14px;
+}
+
+/* Feature / navigation card — neutral, with a small colour icon-field inside. */
+.wl-feature {
+  display: flex;
+  flex-direction: column;
+  gap: 13px;
+  padding: 16px;
+  background: #ffffff;
+  border: 1px solid var(--hairline);
+  border-radius: 14px;
+  text-decoration: none;
+  transition: border-color 150ms ease, transform 150ms ease;
+}
+.wl-feature:hover {
+  border-color: rgba(26, 26, 24, 0.22);
+  transform: translateY(-2px);
+}
+
+/* Small colour icon-field (~40px): dark-border signature, dark glyph. */
+.wl-iconfield {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  border: 1px solid var(--ink);
+  color: var(--ink);
+}
+
+/* Eyebrow label — small uppercase, used above big titles. */
+.wl-eyebrow {
+  font-size: 11px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--ink-muted);
+}
+
+/* Primary action = brand purple, filled, white text. The single coloured CTA. */
+.wl-btn-primary {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 14px;
+  background: var(--accent-purple);
+  color: #ffffff;
+  font-size: 13px;
+  font-weight: 500;
+  border-radius: 10px;
+  border: 1px solid var(--accent-purple);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background-color 120ms ease, border-color 120ms ease;
+}
+.wl-btn-primary:hover:not(:disabled) {
+  background: var(--accent-purple-hover);
+  border-color: var(--accent-purple-hover);
+}
+.wl-btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.wl-btn-secondary {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 14px;
+  background: var(--bg-base);
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 500;
+  border-radius: 10px;
+  border: 1px solid var(--hairline);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: border-color 120ms ease, background-color 120ms ease;
+}
+.wl-btn-secondary:hover:not(:disabled) {
+  border-color: var(--ink);
+  background: var(--bg-surface);
+}
+.wl-btn-secondary:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* Status pill — neutral, a small coloured status dot does the colour work. */
+.wl-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  font-size: 12px;
+  font-weight: 500;
+  border-radius: 999px;
+  border: 1px solid var(--hairline);
+  background: #ffffff;
+  color: var(--ink-secondary);
+}
+.wl-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  flex-shrink: 0;
 }
 
 @theme inline {

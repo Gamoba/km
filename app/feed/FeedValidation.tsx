@@ -2,111 +2,40 @@
 
 import type { ValidationResult, ValidationIssue } from '@/lib/feedValidator'
 
-// ── Icons ──────────────────────────────────────────────────────────────────
-
-function IconCheck() {
-  return (
-    <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-    </svg>
-  )
-}
-
-function IconWarning() {
-  return (
-    <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
-    </svg>
-  )
-}
-
-function IconError() {
-  return (
-    <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-      <circle cx="12" cy="12" r="10" />
-      <line x1="15" y1="9" x2="9" y2="15" />
-      <line x1="9" y1="9" x2="15" y2="15" />
-    </svg>
-  )
-}
-
 // ── Sub-components ─────────────────────────────────────────────────────────
 
+// Calm status line — a small coloured dot does the colour work, not a filled
+// banner. (Design system: colour as small accents.)
 function StatusBanner({ result }: { result: ValidationResult }) {
   const errorCount = result.issues.filter((i) => i.type === 'error').length
   const warnCount = result.issues.filter((i) => i.type === 'warning').length
-  const subtitle =
+  const checked =
     result.productsChecked > 0
       ? `${result.productsChecked} products checked`
-      : 'Last saved validation — run again for updated result'
+      : 'Last saved validation — run again for an updated result'
 
-  if (result.status === 'ok') {
-    return (
-      <div
-        className="flex items-center gap-2.5 p-3"
-        style={{
-          background: 'var(--color-badge-success-bg)',
-          border: '1px solid var(--color-badge-success-text)',
-          borderRadius: '4px',
-          color: 'var(--color-badge-success-text)',
-        }}
-      >
-        <IconCheck />
-        <div>
-          <p style={{ fontSize: '12px', fontWeight: 500 }}>Feed is ready for Google Merchant Center</p>
-          <p className="mt-0.5" style={{ fontSize: '11px', opacity: 0.85 }}>
-            {result.productsChecked > 0
-              ? `${result.productsChecked} products checked — no issues found`
-              : subtitle}
-          </p>
-        </div>
-      </div>
-    )
-  }
+  let dot = 'var(--accent-green)'
+  let title = 'Feed is ready for Google Merchant Center'
+  let subtitle = result.productsChecked > 0 ? `${result.productsChecked} products checked — no issues found` : checked
 
   if (result.status === 'warnings') {
-    return (
-      <div
-        className="flex items-center gap-2.5 p-3"
-        style={{
-          background: 'var(--color-badge-warning-bg)',
-          border: '1px solid var(--color-badge-warning-text)',
-          borderRadius: '4px',
-          color: 'var(--color-badge-warning-text)',
-        }}
-      >
-        <IconWarning />
-        <div>
-          <p style={{ fontSize: '12px', fontWeight: 500 }}>
-            {warnCount} {warnCount === 1 ? 'warning' : 'warnings'} — feed works but can be improved
-          </p>
-          <p className="mt-0.5" style={{ fontSize: '11px', opacity: 0.85 }}>
-            {subtitle}
-          </p>
-        </div>
-      </div>
-    )
+    dot = 'var(--accent-amber)'
+    title = `${warnCount} ${warnCount === 1 ? 'warning' : 'warnings'} — feed works but can be improved`
+    subtitle = checked
+  } else if (result.status === 'errors') {
+    dot = 'var(--accent-red)'
+    title =
+      `${errorCount} ${errorCount === 1 ? 'error' : 'errors'} — feed will be rejected by Google` +
+      (warnCount > 0 ? ` · ${warnCount} ${warnCount === 1 ? 'warning' : 'warnings'}` : '')
+    subtitle = checked
   }
 
   return (
-    <div
-      className="flex items-center gap-2.5 p-3"
-      style={{
-        background: 'var(--color-badge-danger-bg)',
-        border: '1px solid var(--color-badge-danger-text)',
-        borderRadius: '4px',
-        color: 'var(--color-badge-danger-text)',
-      }}
-    >
-      <IconError />
+    <div className="flex items-start gap-2.5">
+      <span className="wl-dot" style={{ background: dot, marginTop: '6px' }} />
       <div>
-        <p style={{ fontSize: '12px', fontWeight: 500 }}>
-          {errorCount} {errorCount === 1 ? 'error' : 'errors'} — feed will be rejected by Google
-          {warnCount > 0 && ` · ${warnCount} ${warnCount === 1 ? 'warning' : 'warnings'}`}
-        </p>
-        <p className="mt-0.5" style={{ fontSize: '11px', opacity: 0.85 }}>
-          {subtitle}
-        </p>
+        <p style={{ fontSize: '13px', fontWeight: 500, color: 'var(--ink)' }}>{title}</p>
+        <p className="mt-0.5" style={{ fontSize: '12px', color: 'var(--ink-muted)' }}>{subtitle}</p>
       </div>
     </div>
   )
@@ -115,56 +44,57 @@ function StatusBanner({ result }: { result: ValidationResult }) {
 function IssueRow({ issue }: { issue: ValidationIssue }) {
   const isError = issue.type === 'error'
   return (
-    <div
-      className="flex items-start gap-2.5 py-2.5"
-      style={{ borderBottom: '1px solid var(--color-border-tertiary)' }}
-    >
-      <div
-        className="mt-0.5 shrink-0"
-        style={{ color: isError ? 'var(--color-badge-danger-text)' : 'var(--color-badge-warning-text)' }}
-      >
-        {isError ? <IconError /> : <IconWarning />}
-      </div>
+    <div className="flex items-start gap-3" style={{ padding: '12px 0', borderBottom: '1px solid var(--hairline)' }}>
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2 flex-wrap">
-          <code
-            className="ff-mono px-1.5 py-0.5"
+          <span
             style={{
-              fontSize: '10px',
-              background: 'var(--color-background-secondary)',
-              borderRadius: '3px',
-              color: 'var(--color-text-primary)',
+              fontSize: '11px',
+              fontWeight: 500,
+              padding: '1px 8px',
+              borderRadius: '999px',
+              border: '1px solid var(--hairline)',
+              background: '#ffffff',
+              color: isError ? 'var(--accent-red)' : 'var(--accent-amber)',
+            }}
+          >
+            {isError ? 'Error' : 'Warning'}
+          </span>
+          <code
+            className="ff-mono"
+            style={{
+              fontSize: '11px',
+              padding: '1px 7px',
+              background: 'var(--bg-surface)',
+              borderRadius: '6px',
+              color: 'var(--ink-secondary)',
             }}
           >
             {issue.field}
           </code>
-          <span className={`ff-badge ${isError ? 'ff-badge-danger' : 'ff-badge-warning'}`}>
-            {isError ? 'Error' : 'Warning'}
-          </span>
         </div>
-        <p className="mt-1" style={{ fontSize: '12px', color: 'var(--color-text-primary)' }}>{issue.message}</p>
+        <p className="mt-1.5" style={{ fontSize: '13px', color: 'var(--ink)' }}>{issue.message}</p>
         {issue.exampleValue !== undefined && (
           <div
-            className="mt-1.5 ff-mono px-2 py-1"
+            className="mt-1.5 ff-mono"
             style={{
               fontSize: '11px',
-              background: 'var(--color-background-secondary)',
-              borderRadius: '3px',
-              color: 'var(--color-text-secondary)',
-              wordBreak: 'break-all',
+              padding: '6px 9px',
+              background: 'var(--bg-surface)',
+              borderRadius: '8px',
+              color: 'var(--ink-secondary)',
+              wordBreak: 'break-word',
             }}
           >
-            <span style={{ color: 'var(--color-text-tertiary)' }}>Example: </span>
+            <span style={{ color: 'var(--ink-muted)' }}>Example: </span>
             {issue.exampleValue === '' ? <em style={{ fontStyle: 'italic' }}>(empty)</em> : issue.exampleValue}
           </div>
         )}
       </div>
       {issue.affectedCount > 0 && (
-        <div className="shrink-0 text-right">
-          <span className="ff-badge ff-badge-neutral">
-            {issue.affectedCount} {issue.affectedCount === 1 ? 'product' : 'products'}
-          </span>
-        </div>
+        <span className="shrink-0" style={{ fontSize: '11px', color: 'var(--ink-muted)' }}>
+          {issue.affectedCount} {issue.affectedCount === 1 ? 'product' : 'products'}
+        </span>
       )}
     </div>
   )
@@ -173,8 +103,7 @@ function IssueRow({ issue }: { issue: ValidationIssue }) {
 // ── Main component ─────────────────────────────────────────────────────────
 
 // Controlled component — `result`, `isRunning`, `runError` and `onRun` are
-// owned by the parent so they can be shared with the compact ValidationMini
-// summary on the feed dashboard.
+// owned by the parent so the feed overview stays in sync.
 export function FeedValidation({
   result,
   isRunning,
@@ -190,10 +119,13 @@ export function FeedValidation({
   const warnings = result?.issues.filter((i) => i.type === 'warning') ?? []
 
   return (
-    <div className="ff-panel">
-      <div className="ff-panel-header">
-        <span>Feed validation</span>
-        <button onClick={onRun} disabled={isRunning} className="ff-btn-primary">
+    <div className="wl-card">
+      <div
+        className="flex items-center justify-between"
+        style={{ padding: '14px 18px', borderBottom: '1px solid var(--hairline)' }}
+      >
+        <span style={{ fontSize: '15px', fontWeight: 500, color: 'var(--ink)' }}>Validation</span>
+        <button onClick={onRun} disabled={isRunning} className="wl-btn-primary">
           {isRunning ? (
             <>
               <svg className="w-3 h-3 animate-spin" fill="none" viewBox="0 0 24 24">
@@ -208,34 +140,25 @@ export function FeedValidation({
         </button>
       </div>
 
-      <div className="p-3.5 space-y-3">
+      <div className="p-4 space-y-3.5">
         {runError && (
           <div
-            className="p-2.5"
-            style={{
-              background: 'var(--color-badge-danger-bg)',
-              border: '1px solid var(--color-badge-danger-text)',
-              borderRadius: '4px',
-            }}
+            className="flex items-start gap-2.5"
+            style={{ padding: '10px 12px', border: '1px solid var(--hairline)', borderRadius: '10px' }}
           >
-            <p style={{ fontSize: '12px', color: 'var(--color-badge-danger-text)' }}>{runError}</p>
+            <span className="wl-dot" style={{ background: 'var(--accent-red)', marginTop: '5px' }} />
+            <p style={{ fontSize: '12px', color: 'var(--ink-secondary)' }}>{runError}</p>
           </div>
         )}
 
         {!result && !isRunning && (
-          <p
-            className="text-center py-4"
-            style={{ fontSize: '11px', color: 'var(--color-text-tertiary)' }}
-          >
-            Click &quot;Run validation&quot; to check your feed against Google&apos;s requirements
+          <p className="text-center py-5" style={{ fontSize: '13px', color: 'var(--ink-muted)' }}>
+            Run validation to check your feed against Google&apos;s requirements.
           </p>
         )}
 
         {isRunning && (
-          <p
-            className="text-center py-4"
-            style={{ fontSize: '11px', color: 'var(--color-text-tertiary)' }}
-          >
+          <p className="text-center py-5" style={{ fontSize: '13px', color: 'var(--ink-muted)' }}>
             Fetching and validating the first 20 products…
           </p>
         )}
@@ -245,32 +168,22 @@ export function FeedValidation({
             <StatusBanner result={result} />
 
             {result.issues.length > 0 && (
-              <div className="space-y-3">
+              <div className="space-y-4">
                 {errors.length > 0 && (
                   <div>
-                    <p className="ff-label mb-2">Errors ({errors.length})</p>
-                    <div
-                      className="px-3"
-                      style={{ border: '1px solid var(--color-border-tertiary)', borderRadius: '4px' }}
-                    >
-                      {errors.map((issue, i) => (
-                        <IssueRow key={i} issue={issue} />
-                      ))}
-                    </div>
+                    <p className="wl-eyebrow" style={{ marginBottom: '2px' }}>Errors ({errors.length})</p>
+                    {errors.map((issue, i) => (
+                      <IssueRow key={i} issue={issue} />
+                    ))}
                   </div>
                 )}
 
                 {warnings.length > 0 && (
                   <div>
-                    <p className="ff-label mb-2">Warnings ({warnings.length})</p>
-                    <div
-                      className="px-3"
-                      style={{ border: '1px solid var(--color-border-tertiary)', borderRadius: '4px' }}
-                    >
-                      {warnings.map((issue, i) => (
-                        <IssueRow key={i} issue={issue} />
-                      ))}
-                    </div>
+                    <p className="wl-eyebrow" style={{ marginBottom: '2px' }}>Warnings ({warnings.length})</p>
+                    {warnings.map((issue, i) => (
+                      <IssueRow key={i} issue={issue} />
+                    ))}
                   </div>
                 )}
               </div>

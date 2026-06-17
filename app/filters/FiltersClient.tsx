@@ -2,9 +2,9 @@
 
 import { useEffect, useState, useTransition } from 'react'
 import type { ShopifyProduct } from '@/lib/shopify'
-import { saveFilters } from './actions'
+import { saveFilters, getFeedMetafields } from './actions'
 import type { FilterRule, FilterConfig } from './actions'
-import { FilterSection, defaultRule, defaultConfig } from '@/app/components/FilterEditor'
+import { FilterSection, defaultRule, defaultConfig, type MetafieldOption } from '@/app/components/FilterEditor'
 
 const NO_VALUE_OPS = new Set(['is_empty', 'is_not_empty'])
 
@@ -55,6 +55,16 @@ export function FiltersClient({
   const [isPending, startTransition] = useTransition()
   const [saveError, setSaveError] = useState<string | null>(null)
   const [saveSuccess, setSaveSuccess] = useState(false)
+
+  // Feed's actual metafields → the rule editor's metafield dropdown (pick from
+  // what exists, with readable definition names instead of mangled keys).
+  // Undefined until loaded; while undefined the editor falls back to free text.
+  const [metafields, setMetafields] = useState<MetafieldOption[] | undefined>(undefined)
+  useEffect(() => {
+    getFeedMetafields(feedId).then((r) => {
+      if ('data' in r) setMetafields(r.data)
+    })
+  }, [feedId])
 
   useEffect(() => {
     fetch(`/api/products?feedId=${encodeURIComponent(feedId)}`)
@@ -133,7 +143,7 @@ export function FiltersClient({
             <span style={{ fontSize: '11px', color: 'var(--color-badge-danger-text)' }}>{saveError}</span>
           )}
           <button onClick={handleSave} disabled={isPending} className="ff-btn-primary">
-            {isPending ? 'Saving…' : saveSuccess ? 'Saved' : 'Save rules'}
+            {isPending ? 'Saving…' : saveSuccess ? 'Saved' : 'Save'}
           </button>
         </div>
       </header>
@@ -149,6 +159,7 @@ export function FiltersClient({
           onRemoveRule={(i) => removeRule('include', i)}
           onUpdateRule={(i, p) => updateRule('include', i, p)}
           onSetOperator={(op) => setOperator('include', op)}
+          metafieldOptions={metafields}
         />
         <FilterSection
           title="Exclude products"
@@ -160,6 +171,7 @@ export function FiltersClient({
           onRemoveRule={(i) => removeRule('exclude', i)}
           onUpdateRule={(i, p) => updateRule('exclude', i, p)}
           onSetOperator={(op) => setOperator('exclude', op)}
+          metafieldOptions={metafields}
         />
       </main>
     </div>

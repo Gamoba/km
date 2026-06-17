@@ -231,8 +231,8 @@ function FeedCard({
 
       <div className="px-3.5 py-3 space-y-2">
         <Stat label="Products" value={String(feed.productCount)} />
-        <Stat label="Included products" value={feed.includedCount != null ? String(feed.includedCount) : '—'} />
-        <Stat label="Excluded products" value={feed.excludedCount != null ? String(feed.excludedCount) : '—'} />
+        <Stat label="Included products" value={formatIncluded(feed.includedCount, feed.productCount)} />
+        <Stat label="Excluded products" value={formatExcluded(feed.excludedCount)} />
         <Stat
           label="Products synced"
           value={
@@ -527,6 +527,21 @@ function Stat({ label, value }: { label: string; value: string }) {
       <span style={{ fontSize: '11px', color: 'var(--color-text-primary)' }}>{value}</span>
     </div>
   )
+}
+
+// Clearer than a bare "—": "…" means the count is still loading, while a loaded
+// value reads unambiguously — "All" when nothing is filtered out, "None" when
+// nothing is excluded.
+function formatIncluded(count: number | null, total: number): string {
+  if (count == null) return '…'
+  if (count === total) return 'All'
+  return String(count)
+}
+
+function formatExcluded(count: number | null): string {
+  if (count == null) return '…'
+  if (count === 0) return 'None'
+  return String(count)
 }
 
 // ── Modals ────────────────────────────────────────────────────────────────

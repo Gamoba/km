@@ -7,6 +7,19 @@ import { saveMappings, type MappingEntry } from './actions'
 // mode without prop-drilling through 8+ render sites.
 const FeedModeContext = createContext<'product' | 'variant'>('product')
 
+// Maps a metafield token ("metafield:custom._rgang") to its readable definition
+// name ("Årgang"). Shopify mangles non-ASCII keys, so the raw key is illegible;
+// the name lives in the metafield definition (resolved server-side). Provided
+// via context so the deep field pickers can show it without prop-drilling.
+// Missing entries fall back to the raw key.
+const MetafieldLabelsContext = createContext<Map<string, string>>(new Map())
+
+// Readable label for a "metafield:ns.key" token: the definition name when known,
+// else the raw "ns.key" (the token minus its "metafield:" prefix).
+function metafieldDisplayName(token: string, labels: Map<string, string>): string {
+  return labels.get(token) ?? token.replace('metafield:', '')
+}
+
 // ── Types ──────────────────────────────────────────────────────────────────
 
 type MappingType =
@@ -464,6 +477,7 @@ function FieldSelect({
   allFields: string[]
 }) {
   const feedMode = useContext(FeedModeContext)
+  const metafieldLabels = useContext(MetafieldLabelsContext)
   const labels = useMemo(() => getFieldLabels(feedMode), [feedMode])
   const standard = allFields.filter((f) => !f.startsWith('metafield:'))
   const meta = allFields.filter((f) => f.startsWith('metafield:'))
@@ -478,7 +492,7 @@ function FieldSelect({
       {meta.length > 0 && (
         <optgroup label="Metafields">
           {meta.map((f) => (
-            <option key={f} value={f}>{f.replace('metafield:', '')}</option>
+            <option key={f} value={f}>{metafieldDisplayName(f, metafieldLabels)}</option>
           ))}
         </optgroup>
       )}
@@ -500,6 +514,7 @@ function CombineChipsEditor({
   onChange: (next: CombineBlock[]) => void
 }) {
   const feedMode = useContext(FeedModeContext)
+  const metafieldLabels = useContext(MetafieldLabelsContext)
   const labels = useMemo(() => getFieldLabels(feedMode), [feedMode])
   const [picker, setPicker] = useState<'none' | 'field' | 'text'>('none')
   const [draggedIdx, setDraggedIdx] = useState<number | null>(null)
@@ -567,7 +582,7 @@ function CombineChipsEditor({
   function chipLabel(b: CombineBlock): string {
     if (b.type === 'text') return b.value
     if (!b.value) return ''
-    if (b.value.startsWith('metafield:')) return b.value.replace('metafield:', '')
+    if (b.value.startsWith('metafield:')) return metafieldDisplayName(b.value, metafieldLabels)
     return labels[b.value] ?? b.value
   }
 
@@ -754,6 +769,7 @@ function FieldPickerPanel({
   onSelect: (field: string) => void
   onClose: () => void
 }) {
+  const metafieldLabels = useContext(MetafieldLabelsContext)
   const [search, setSearch] = useState('')
   const standard = useMemo(
     () => allFields.filter((f) => !f.startsWith('metafield:')),
@@ -772,7 +788,13 @@ function FieldPickerPanel({
           (labels[f] ?? '').toLowerCase().includes(q)
       )
     : standard
-  const filteredMeta = q ? meta.filter((f) => f.toLowerCase().includes(q)) : meta
+  const filteredMeta = q
+    ? meta.filter(
+        (f) =>
+          f.toLowerCase().includes(q) ||
+          (metafieldLabels.get(f) ?? '').toLowerCase().includes(q)
+      )
+    : meta
 
   return (
     <div
@@ -826,14 +848,19 @@ function FieldPickerPanel({
             >
               Metafields
             </div>
-            {filteredMeta.map((f) => (
-              <PickerOption
-                key={f}
-                onClick={() => onSelect(f)}
-                primary={f.replace('metafield:', '')}
-                mono
-              />
-            ))}
+            {filteredMeta.map((f) => {
+              const rawKey = f.replace('metafield:', '')
+              const name = metafieldLabels.get(f)
+              return (
+                <PickerOption
+                  key={f}
+                  onClick={() => onSelect(f)}
+                  primary={name ?? rawKey}
+                  secondary={name ? rawKey : undefined}
+                  mono={!name}
+                />
+              )
+            })}
           </>
         )}
         {filteredStandard.length === 0 && filteredMeta.length === 0 && (
@@ -1650,7 +1677,7 @@ function ShopifyFieldsModal({
   onClose,
 }: {
   standardFields: string[]
-  metafields: { namespace: string; key: string }[]
+  metafields: { namespace: string; key: string; name?: string }[]
   product: PreviewProduct | null
   loading: boolean
   marketUrl: string | null
@@ -1669,7 +1696,11 @@ function ShopifyFieldsModal({
   const q = search.toLowerCase()
   const filteredStandard = q ? standardFields.filter((f) => f.toLowerCase().includes(q)) : standardFields
   const filteredMeta = q
-    ? metafields.filter((m) => `${m.namespace}.${m.key}`.toLowerCase().includes(q))
+    ? metafields.filter(
+        (m) =>
+          `${m.namespace}.${m.key}`.toLowerCase().includes(q) ||
+          (m.name ?? '').toLowerCase().includes(q)
+      )
     : metafields
 
   const totalMapped =
@@ -1740,13 +1771,21 @@ function ShopifyFieldsModal({
               ) : (
                 filteredMeta.map((m) => {
                   const fullKey = `metafield:${m.namespace}.${m.key}`
+                  const rawKey = `${m.namespace}.${m.key}`
                   return (
                     <div
                       key={fullKey}
                       className="flex items-start gap-3 px-6 py-2.5 border-b border-gray-50 last:border-b-0"
                     >
                       <div className="w-52 shrink-0 pt-0.5">
-                        <code className="text-xs font-mono text-gray-700">{m.namespace}.{m.key}</code>
+                        {m.name ? (
+                          <>
+                            <span className="text-xs font-medium text-gray-700">{m.name}</span>
+                            <code className="block text-[10px] font-mono text-gray-400">{rawKey}</code>
+                          </>
+                        ) : (
+                          <code className="text-xs font-mono text-gray-700">{rawKey}</code>
+                        )}
                       </div>
                       <div className="flex-1 min-w-0 text-xs text-gray-500 break-all pt-0.5">
                         <FieldExample value={exampleFor(fullKey)} />
@@ -3127,13 +3166,13 @@ export default function MappingClient({
   // the paginated scan returns. Saved mappings that reference metafields are
   // unaffected — they round-trip through their stored "metafield:..." keys.
   const [metafields, setMetafields] = useState<
-    { namespace: string; key: string }[]
+    { namespace: string; key: string; name?: string }[]
   >([])
   useEffect(() => {
     let cancelled = false
     fetch(`/api/mapping/metafields?feedId=${encodeURIComponent(feedId)}`)
       .then((r) => r.json())
-      .then((data: { metafields?: { namespace: string; key: string }[] }) => {
+      .then((data: { metafields?: { namespace: string; key: string; name?: string }[] }) => {
         if (cancelled) return
         setMetafields(data.metafields ?? [])
       })
@@ -3381,6 +3420,15 @@ export default function MappingClient({
     ...metafields.map((m) => `metafield:${m.namespace}.${m.key}`),
   ]
 
+  // Token → readable definition name, for the field pickers (see context above).
+  const metafieldLabels = useMemo(() => {
+    const m = new Map<string, string>()
+    for (const mf of metafields) {
+      if (mf.name) m.set(`metafield:${mf.namespace}.${mf.key}`, mf.name)
+    }
+    return m
+  }, [metafields])
+
   // Visible fields = required + collapsible + user-added advanced fields +
   // custom user-defined fields. The topbar denominator reflects what the
   // user can see in the UI, not every field ALL_FIELDS could in theory contain.
@@ -3450,6 +3498,7 @@ export default function MappingClient({
 
   return (
     <FeedModeContext.Provider value={feedMode}>
+    <MetafieldLabelsContext.Provider value={metafieldLabels}>
     <div className="min-h-screen">
       <header className="ff-topbar">
         <div className="flex items-center gap-3">
@@ -3538,7 +3587,7 @@ export default function MappingClient({
             <span style={{ fontSize: '11px', color: 'var(--color-badge-danger-text)' }}>{errorMsg}</span>
           )}
           <button onClick={handleSave} disabled={isPending} className="ff-btn-primary">
-            {isPending ? 'Saving…' : 'Save mapping'}
+            {isPending ? 'Saving…' : 'Save'}
           </button>
         </div>
       </header>
@@ -3669,6 +3718,7 @@ export default function MappingClient({
         />
       )}
     </div>
+    </MetafieldLabelsContext.Provider>
     </FeedModeContext.Provider>
   )
 }

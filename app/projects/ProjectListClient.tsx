@@ -17,10 +17,19 @@ type ProjectSummary = {
   feedCount: number
 }
 
+// Per-project rollup aggregated client-side from each project's feeds (reusing
+// /api/feeds, which already returns per-feed productCount + validationStatus).
+// No new server endpoint, no DB change. Best-effort — a project stays without an
+// aggregate (card shows "…") if its feeds can't be fetched.
+type ProjectAggregate = { products: number; errorFeeds: number; warningFeeds: number }
+
+type FeedRollupRow = { productCount?: number; validationStatus?: 'ok' | 'warnings' | 'errors' | null }
+
 type PatchedProject = { id: string; name: string; description: string | null }
 
 export function ProjectListClient() {
   const [projects, setProjects] = useState<ProjectSummary[] | null>(null)
+  const [aggregates, setAggregates] = useState<Map<string, ProjectAggregate>>(new Map())
   const [error, setError] = useState<string | null>(null)
   const [showCreate, setShowCreate] = useState(false)
 
@@ -30,10 +39,41 @@ export function ProjectListClient() {
       const res = await fetch('/api/projects')
       const data = (await res.json()) as { projects?: ProjectSummary[]; error?: string }
       if (data.error) throw new Error(data.error)
-      setProjects(data.projects ?? [])
+      const list = data.projects ?? []
+      setProjects(list)
+      loadAggregates(list.map((p) => p.id))
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unknown error')
     }
+  }
+
+  // Roll up product totals + feed-health per project. One /api/feeds call per
+  // project, in parallel; setState only after all settle (async callback).
+  async function loadAggregates(ids: string[]) {
+    const entries = await Promise.all(
+      ids.map(async (id): Promise<readonly [string, ProjectAggregate | null]> => {
+        try {
+          const res = await fetch(`/api/feeds?projectId=${encodeURIComponent(id)}`)
+          const data = (await res.json()) as { feeds?: FeedRollupRow[] }
+          const feeds = data.feeds ?? []
+          return [
+            id,
+            {
+              products: feeds.reduce((s, f) => s + (f.productCount ?? 0), 0),
+              errorFeeds: feeds.filter((f) => f.validationStatus === 'errors').length,
+              warningFeeds: feeds.filter((f) => f.validationStatus === 'warnings').length,
+            },
+          ] as const
+        } catch {
+          return [id, null] as const
+        }
+      })
+    )
+    setAggregates((prev) => {
+      const next = new Map(prev)
+      for (const [id, agg] of entries) if (agg) next.set(id, agg)
+      return next
+    })
   }
 
   useEffect(() => {
@@ -105,6 +145,7 @@ export function ProjectListClient() {
               <ProjectCard
                 key={p.id}
                 project={p}
+                aggregate={aggregates.get(p.id)}
                 onPatched={handlePatched}
                 onDeleted={handleDeleted}
               />
@@ -120,10 +161,12 @@ export function ProjectListClient() {
 
 function ProjectCard({
   project,
+  aggregate,
   onPatched,
   onDeleted,
 }: {
   project: ProjectSummary
+  aggregate?: ProjectAggregate
   onPatched: (updated: PatchedProject) => void
   onDeleted: (id: string) => void
 }) {
@@ -153,6 +196,7 @@ function ProjectCard({
           )}
         </div>
         <div className="flex items-center gap-2 shrink-0">
+          {aggregate && <FeedHealthBadge aggregate={aggregate} />}
           <span className={badge.className}>{badge.label}</span>
           <CardMenu onRename={() => setOpenModal('rename')} onDelete={() => setOpenModal('delete')} />
         </div>
@@ -160,6 +204,7 @@ function ProjectCard({
 
       <div className="px-3.5 py-3 space-y-2">
         <Stat label="Feeds" value={String(project.feedCount)} />
+        <Stat label="Products" value={aggregate ? aggregate.products.toLocaleString('en-US') : '…'} />
         <Stat
           label="Last verified"
           value={
@@ -335,6 +380,27 @@ function Stat({ label, value }: { label: string; value: string }) {
       <span style={{ fontSize: '11px', color: 'var(--color-text-primary)' }}>{value}</span>
     </div>
   )
+}
+
+// Rolls a project's feed warnings/errors up to a single at-a-glance badge so
+// problems are visible while scanning the grid. Renders nothing when all the
+// project's feeds are healthy (errors take precedence over warnings).
+function FeedHealthBadge({ aggregate }: { aggregate: ProjectAggregate }) {
+  if (aggregate.errorFeeds > 0) {
+    return (
+      <span className="ff-badge ff-badge-danger shrink-0">
+        {aggregate.errorFeeds} {aggregate.errorFeeds === 1 ? 'error' : 'errors'}
+      </span>
+    )
+  }
+  if (aggregate.warningFeeds > 0) {
+    return (
+      <span className="ff-badge ff-badge-warning shrink-0">
+        {aggregate.warningFeeds} {aggregate.warningFeeds === 1 ? 'warning' : 'warnings'}
+      </span>
+    )
+  }
+  return null
 }
 
 // ── Modals ────────────────────────────────────────────────────────────────

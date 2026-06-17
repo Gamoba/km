@@ -132,10 +132,18 @@ export function BucketListPanel({
                     </div>
                   )}
                   <div className="mt-1" style={{ fontSize: '11px', color: 'var(--color-text-tertiary)' }}>
-                    {b.memberCount} {b.memberCount === 1 ? 'product' : 'products'}
-                    {b.aiGenerated > 0 ? ` · ${b.aiGenerated} optimized` : ''}
-                    {b.humanEdited > 0 ? ` · ${b.humanEdited} hand-edited` : ''}
-                    {b.needsReview > 0 ? ` · ${b.needsReview} to review` : ''}
+                    {b.memberCount === 0 ? (
+                      <span style={{ fontStyle: 'italic', opacity: 0.85 }}>
+                        Empty — add products in Scope
+                      </span>
+                    ) : (
+                      <>
+                        {b.memberCount} {b.memberCount === 1 ? 'product' : 'products'}
+                        {b.aiGenerated > 0 ? ` · ${b.aiGenerated} optimized` : ''}
+                        {b.humanEdited > 0 ? ` · ${b.humanEdited} hand-edited` : ''}
+                        {b.needsReview > 0 ? ` · ${b.needsReview} to review` : ''}
+                      </>
+                    )}
                   </div>
                 </div>
                 {editingId !== b.id && (

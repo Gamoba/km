@@ -1,9 +1,16 @@
 'use client'
 
-import { useState } from 'react'
+import { createContext, useContext, useState } from 'react'
 import type { ShopifyProduct } from '@/lib/shopify'
 
 const PAGE_SIZE_OPTIONS = [25, 50, 100, 200] as const
+
+// Maps a metafield "namespace.key" to its readable definition name ("Årgang").
+// Shopify mangles non-ASCII keys, so the raw key is illegible; the name lives in
+// the metafield definition (resolved server-side). Provided via context so the
+// per-product metafields table can show it without prop-drilling through
+// ProductsTable → ProductRow. Missing entries fall back to the raw key.
+const MetafieldNamesContext = createContext<Map<string, string>>(new Map())
 
 function StatusBadge({ status }: { status: string }) {
   const cls: Record<string, string> = {
@@ -149,6 +156,7 @@ function InfoRow({ label, children }: { label: string; children: React.ReactNode
 }
 
 function ExpandedProduct({ product }: { product: ShopifyProduct }) {
+  const metafieldNames = useContext(MetafieldNamesContext)
   const description = stripAndTruncate(product.body_html, 200)
   const tags = product.tags
     .split(',')
@@ -253,19 +261,33 @@ function ExpandedProduct({ product }: { product: ShopifyProduct }) {
           <table className="ff-table">
             <thead>
               <tr>
-                <th style={{ width: '34%' }}>Namespace · Key</th>
+                <th style={{ width: '34%' }}>Field</th>
                 <th style={{ width: '90px' }}>Type</th>
                 <th>Value</th>
               </tr>
             </thead>
             <tbody>
-              {product.metafields.map((mf) => (
-                <tr key={`${mf.namespace}.${mf.key}`}>
-                  <td
-                    className="ff-mono"
-                    style={{ color: 'var(--color-accent)', whiteSpace: 'nowrap' }}
-                  >
-                    {mf.namespace}.{mf.key}
+              {product.metafields.map((mf) => {
+                const rawKey = `${mf.namespace}.${mf.key}`
+                const name = metafieldNames.get(rawKey)
+                return (
+                <tr key={rawKey}>
+                  <td style={{ whiteSpace: 'nowrap' }}>
+                    {name ? (
+                      <>
+                        <span style={{ color: 'var(--color-text-primary)' }}>{name}</span>
+                        <code
+                          className="ff-mono block"
+                          style={{ fontSize: '10px', color: 'var(--color-text-tertiary)' }}
+                        >
+                          {rawKey}
+                        </code>
+                      </>
+                    ) : (
+                      <code className="ff-mono" style={{ color: 'var(--color-accent)' }}>
+                        {rawKey}
+                      </code>
+                    )}
                   </td>
                   <td
                     className="ff-mono"
@@ -275,7 +297,8 @@ function ExpandedProduct({ product }: { product: ShopifyProduct }) {
                   </td>
                   <td className="break-all">{mf.value}</td>
                 </tr>
-              ))}
+                )
+              })}
             </tbody>
           </table>
         )}
@@ -367,6 +390,7 @@ export function ProductsTable({
   onPageChange,
   onPageSizeChange,
   loading,
+  metafieldNames,
 }: {
   products: ShopifyProduct[]
   total: number
@@ -377,8 +401,12 @@ export function ProductsTable({
   onPageChange: (p: number) => void
   onPageSizeChange: (n: number) => void
   loading: boolean
+  // "namespace.key" → readable definition name. Optional: when omitted (or a key
+  // is missing) the metafields table falls back to the raw key.
+  metafieldNames?: Map<string, string>
 }) {
   return (
+    <MetafieldNamesContext.Provider value={metafieldNames ?? new Map()}>
     <div>
       <div
         className="space-y-1.5"
@@ -411,5 +439,6 @@ export function ProductsTable({
         />
       )}
     </div>
+    </MetafieldNamesContext.Provider>
   )
 }

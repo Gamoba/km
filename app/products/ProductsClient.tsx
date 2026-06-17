@@ -35,6 +35,10 @@ export function ProductsClient({
   const [phase, setPhase] = useState<Phase>('loading')
   const [products, setProducts] = useState<ShopifyProduct[]>([])
   const [meta, setMeta] = useState<MetaResponse | null>(null)
+  // "namespace.key" → readable metafield definition name, so the per-product
+  // metafields table shows "Årgang" rather than the mangled "custom._rgang".
+  // Best-effort: stays empty if the lookup fails, falling back to raw keys.
+  const [metafieldNames, setMetafieldNames] = useState<Map<string, string>>(new Map())
   const [productsLoading, setProductsLoading] = useState(true)
   const [metaLoading, setMetaLoading] = useState(true)
 
@@ -53,6 +57,24 @@ export function ProductsClient({
   // fresh ones (typing fast in the search box reproduced this).
   const productsReq = useRef(0)
   const metaReq = useRef(0)
+
+  // Metafield definition names (one cheap, cached per-feed lookup). setState only
+  // inside the async callback, per the repo's set-state-in-effect rule.
+  useEffect(() => {
+    let cancelled = false
+    fetch(`/api/metafield-names?feedId=${encodeURIComponent(feedId)}`)
+      .then((r) => r.json())
+      .then((d: { names?: Record<string, string> }) => {
+        if (cancelled) return
+        setMetafieldNames(new Map(Object.entries(d.names ?? {})))
+      })
+      .catch(() => {
+        // Non-fatal — the metafields table stays on raw keys.
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [feedId])
 
   // Debounce raw input → committed query (300ms).
   useEffect(() => {
@@ -315,6 +337,7 @@ export function ProductsClient({
                 onPageChange={setPage}
                 onPageSizeChange={setPageSize}
                 loading={isStale}
+                metafieldNames={metafieldNames}
               />
             )}
           </>

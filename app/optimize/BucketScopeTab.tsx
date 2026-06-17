@@ -223,12 +223,20 @@ export function BucketScopeTab({
 
   return (
     <div className="space-y-3">
-      {error && <div style={{ fontSize: '11px', color: 'var(--color-badge-danger-text)' }}>{error}</div>}
+      {/* Self-contained sub-header: primary save sits top-right, consistent with
+          the Settings/Mapping/Filters pages. Saving the scope also previews the
+          matches below; membership is then confirmed separately. */}
+      <div className="flex items-start justify-between gap-3">
+        <p style={{ fontSize: '11px', color: 'var(--color-text-tertiary)' }}>
+          Define which products this bucket targets. Save to preview the matches, decide what to do
+          with any that already belong to another bucket, then confirm membership below.
+        </p>
+        <button onClick={handlePreview} disabled={previewing} className="ff-btn-primary shrink-0">
+          {previewing ? 'Saving…' : 'Save scope'}
+        </button>
+      </div>
 
-      <p style={{ fontSize: '11px', color: 'var(--color-text-tertiary)' }}>
-        Define which products this bucket targets. Preview the matches, decide what to do with any
-        that already belong to another bucket, then save the membership.
-      </p>
+      {error && <div style={{ fontSize: '11px', color: 'var(--color-badge-danger-text)' }}>{error}</div>}
 
       <FilterSection
         title="Include products"
@@ -254,10 +262,6 @@ export function BucketScopeTab({
         onSetOperator={(op) => setOp('exclude', op)}
         metafieldOptions={metafields}
       />
-
-      <button onClick={handlePreview} disabled={previewing} className="ff-btn-secondary">
-        {previewing ? 'Saving…' : 'Save bucket scope and preview matching products'}
-      </button>
 
       {/* Manual additions — added on top of the filter; survive filter changes. */}
       <div className="ff-panel">
@@ -422,7 +426,7 @@ export function BucketScopeTab({
 
       {stale && candidates && (
         <p style={{ fontSize: '11px', color: 'var(--color-text-tertiary)' }}>
-          Filter changed — preview again to refresh matches before saving.
+          Filter changed — “Save scope” again to refresh the matches before confirming membership.
         </p>
       )}
     </div>

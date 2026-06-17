@@ -278,13 +278,13 @@ export function SettingsClient({
                 Syncing…
               </>
             ) : (
-              'Save and sync'
+              'Save & sync'
             )}
           </button>
         </div>
       </header>
 
-      <main className="px-4 py-4 max-w-3xl space-y-3">
+      <main className="px-4 py-4 max-w-3xl mx-auto space-y-3">
 
         {/* Step 1: Select market */}
         <div className="ff-panel">

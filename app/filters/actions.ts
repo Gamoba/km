@@ -2,9 +2,28 @@
 
 import { createSupabaseServerClient } from '@/lib/supabase-server'
 import { adminDb, getOwnedFeed } from '@/lib/feeds'
+import { getFeedMetafields as getFeedMetafieldsLib, type FeedMetafield } from '@/lib/optimizationBuckets'
 
 export type FilterRule = { field: string; operator: string; value: string }
 export type FilterConfig = { operator: 'AND' | 'OR'; rules: FilterRule[] }
+
+// The feed's metafields (namespace.key + product count + resolved definition
+// name) so the Filters rule editor can offer a pick-list with readable names
+// instead of mangled keys — same data the AI-Titles Scope tab already uses.
+export async function getFeedMetafields(
+  feedId: string
+): Promise<{ data: FeedMetafield[] } | { error: string }> {
+  const supabase = await createSupabaseServerClient()
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
+  if (!user) return { error: 'Unauthorized' }
+
+  const owned = await getOwnedFeed(user.id, feedId)
+  if (!owned) return { error: 'Feed ikke fundet' }
+
+  return { data: await getFeedMetafieldsLib(feedId) }
+}
 
 export async function saveFilters(
   feedId: string,

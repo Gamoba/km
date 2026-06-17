@@ -1,10 +1,13 @@
 import { createSupabaseServerClient } from '@/lib/supabase-server'
 import { adminDb, getOwnedFeed } from '@/lib/feeds'
 import { errorResponse } from '@/lib/errors'
+import { getMetafieldNameMap } from '@/lib/metafieldDefinitions'
 
 const PAGE_SIZE = 1000
 
-// Returns the unique (namespace, key) metafield pairs for a feed. Backs the
+// Returns the unique (namespace, key) metafield pairs for a feed, each with its
+// readable definition name when one exists (e.g. "custom._rgang" → "Årgang") so
+// the mapping pickers show a legible label, not the mangled key. Backs the
 // mapping page's LAG 2 fetch — kept out of the server component so the page
 // renders the saved mappings without waiting on this paginated scan, which
 // can take seconds for stores with thousands of metafield rows.
@@ -24,7 +27,7 @@ export async function GET(req: Request) {
 
   const db = adminDb()
   const seen = new Set<string>()
-  const metafields: { namespace: string; key: string }[] = []
+  const metafields: { namespace: string; key: string; name?: string }[] = []
   let from = 0
 
   while (true) {
@@ -50,6 +53,14 @@ export async function GET(req: Request) {
     }
     if (data.length < PAGE_SIZE) break
     from += PAGE_SIZE
+  }
+
+  // Resolve readable definition names (best-effort — empty map on any failure,
+  // in which case callers fall back to the raw key).
+  const nameMap = await getMetafieldNameMap(feedId)
+  for (const mf of metafields) {
+    const name = nameMap.get(`${mf.namespace}.${mf.key}`)
+    if (name) mf.name = name
   }
 
   return Response.json({ metafields })

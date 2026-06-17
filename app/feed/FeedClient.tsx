@@ -18,8 +18,6 @@ type CacheInfo = {
 // right at this line; anything less means the feed isn't usable yet.
 const NEW_FEED_THRESHOLD = 8
 
-const FULL_VALIDATION_ANCHOR = 'feed-validation-full'
-
 export function FeedClient({
   feedId,
   feedName,
@@ -28,6 +26,7 @@ export function FeedClient({
   mappingCount,
   totalFields,
   lastSynced,
+  optimizedCount,
 }: {
   feedId: string
   feedName: string
@@ -36,6 +35,7 @@ export function FeedClient({
   mappingCount: number
   totalFields: number
   lastSynced: string | null
+  optimizedCount: number
 }) {
   // LAG 2 — included / excluded product counts come from the slow paginated
   // countFilteredProducts call. Fetched client-side so the overview renders
@@ -117,32 +117,49 @@ export function FeedClient({
     })
   }
 
-  function scrollToFullValidation() {
-    document
-      .getElementById(FULL_VALIDATION_ANCHOR)
-      ?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-  }
+  const status = deriveStatus(!!cacheInfo?.generated_at, validation?.status ?? null)
 
   return (
-    <div className="min-h-screen">
-      <header className="ff-topbar">
-        <div className="flex items-center gap-3">
-          <h1 className="ff-topbar-title">{feedName}</h1>
-          <span style={{ fontSize: '11px', color: 'var(--color-text-tertiary)' }}>
-            Manage your Google Shopping feed
-          </span>
-        </div>
-      </header>
-
-      <main className="px-4 py-4 max-w-4xl space-y-3">
+    <div className="min-h-screen" style={{ background: 'var(--bg-base)' }}>
+      <main className="max-w-4xl mx-auto px-6 py-10 space-y-10">
         {showSyncBanner && <SyncStatusBanner feedId={feedId} />}
 
-        <StatusOverview
-          generated={!!cacheInfo?.generated_at}
-          validationStatus={validation?.status ?? null}
-          mappingCount={mappingCount}
-          totalFields={totalFields}
-        />
+        {/* Hero — a big, confident feed title with status as a small eyebrow
+            pill. The title carries the page; colour stays a tiny accent. */}
+        <header className="space-y-3.5">
+          <StatusPill status={status} />
+          <h1
+            style={{
+              fontSize: '34px',
+              fontWeight: 500,
+              letterSpacing: '-0.02em',
+              lineHeight: 1.1,
+              color: 'var(--ink)',
+            }}
+          >
+            {feedName}
+          </h1>
+          <p style={{ fontSize: '15px', lineHeight: 1.6, color: 'var(--ink-secondary)', maxWidth: '48ch' }}>
+            Set up mapping, filters and AI titles, then generate and validate your Google Shopping feed.
+          </p>
+        </header>
+
+        {mappingCount < NEW_FEED_THRESHOLD && (
+          <NextSteps feedId={feedId} onGenerate={regenerate} isGenerating={isGenerating} />
+        )}
+
+        {/* Workspace — calm neutral cards; colour only in the small icon-fields. */}
+        <section className="space-y-4">
+          <div className="wl-eyebrow">Workspace</div>
+          <FunctionCards
+            feedId={feedId}
+            mappingCount={mappingCount}
+            totalFields={totalFields}
+            includedCount={includedCount}
+            feedItemCount={cacheInfo?.product_count ?? null}
+            optimizedCount={optimizedCount}
+          />
+        </section>
 
         <StatisticsSection
           feedItemCount={cacheInfo?.product_count ?? null}
@@ -150,22 +167,6 @@ export function FeedClient({
           excludedCount={excludedCount}
           lastSynced={lastSynced}
           lastGenerated={cacheInfo?.generated_at ?? null}
-        />
-
-        {mappingCount < NEW_FEED_THRESHOLD && (
-          <NextSteps
-            feedId={feedId}
-            onGenerate={regenerate}
-            isGenerating={isGenerating}
-          />
-        )}
-
-        <ValidationMini
-          result={validation}
-          isRunning={isValidating}
-          onRun={runValidation}
-          runError={validationError}
-          onShowDetails={scrollToFullValidation}
         />
 
         <FeedSection
@@ -176,16 +177,191 @@ export function FeedClient({
           error={generateError}
         />
 
-        <div id={FULL_VALIDATION_ANCHOR}>
-          <FeedValidation
-            result={validation}
-            isRunning={isValidating}
-            onRun={runValidation}
-            runError={validationError}
-          />
-        </div>
+        <FeedValidation
+          result={validation}
+          isRunning={isValidating}
+          onRun={runValidation}
+          runError={validationError}
+        />
       </main>
     </div>
+  )
+}
+
+// ── Function cards ──────────────────────────────────────────────────────────
+
+// The feed's key functions as calm neutral cards: a SMALL colour icon-field
+// (the only colour), a title and a key number. Colour lives in the ~40px field,
+// not the whole card. Pure navigation — Links to existing pages, no logic.
+function FunctionCards({
+  feedId,
+  mappingCount,
+  totalFields,
+  includedCount,
+  feedItemCount,
+  optimizedCount,
+}: {
+  feedId: string
+  mappingCount: number
+  totalFields: number
+  includedCount: number | null
+  feedItemCount: number | null
+  optimizedCount: number
+}) {
+  return (
+    <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+      <FeatureCard
+        href={`/feed/${feedId}/mapping`}
+        tint="var(--field-purple)"
+        icon={<IconSliders />}
+        label="Mapping"
+        value={`${mappingCount}/${totalFields}`}
+        sub="fields mapped"
+      />
+      <FeatureCard
+        href={`/feed/${feedId}/optimize`}
+        tint="var(--field-amber)"
+        icon={<IconSparkles />}
+        label="AI Titles"
+        value={String(optimizedCount)}
+        sub="optimized"
+      />
+      <FeatureCard
+        href={`/feed/${feedId}/filters`}
+        tint="var(--field-pink)"
+        icon={<IconFilter />}
+        label="Filters"
+        value={includedCount != null ? String(includedCount) : undefined}
+        sub={includedCount != null ? 'included' : 'Configure rules'}
+      />
+      <FeatureCard
+        href={`/feed/${feedId}/preview`}
+        tint="var(--field-mint)"
+        icon={<IconEye />}
+        label="Preview"
+        value={feedItemCount != null ? String(feedItemCount) : undefined}
+        sub="items in feed"
+      />
+    </div>
+  )
+}
+
+// Card + icon-field styling is inlined (not only the .wl-feature/.wl-iconfield
+// classes) so each card renders as a clearly-bounded, tinted tile regardless of
+// global-CSS compile state; the class only layers on the hover lift.
+function FeatureCard({
+  href,
+  tint,
+  icon,
+  label,
+  value,
+  sub,
+}: {
+  href: string
+  tint: string
+  icon: React.ReactNode
+  label: string
+  value?: string
+  sub: string
+}) {
+  return (
+    <Link
+      href={href}
+      className="wl-feature"
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '13px',
+        padding: '16px',
+        background: '#ffffff',
+        border: '1px solid var(--hairline)',
+        borderRadius: '14px',
+        textDecoration: 'none',
+      }}
+    >
+      <div className="flex items-start justify-between">
+        <span
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            width: '40px',
+            height: '40px',
+            borderRadius: '10px',
+            border: '1px solid var(--ink)',
+            background: tint,
+            color: 'var(--ink)',
+          }}
+        >
+          {icon}
+        </span>
+        <IconArrowUpRight />
+      </div>
+      <div>
+        <div style={{ fontSize: '14px', fontWeight: 500, color: 'var(--ink)' }}>{label}</div>
+        {value ? (
+          <div
+            className="mt-1.5"
+            style={{ fontSize: '24px', fontWeight: 500, letterSpacing: '-0.01em', lineHeight: 1, color: 'var(--ink)' }}
+          >
+            {value}
+          </div>
+        ) : null}
+        <div className="mt-1" style={{ fontSize: '12px', color: 'var(--ink-muted)' }}>{sub}</div>
+      </div>
+    </Link>
+  )
+}
+
+// ── Tabler-style icons (product-neutral) ────────────────────────────────────
+
+const tablerProps = {
+  width: 20,
+  height: 20,
+  viewBox: '0 0 24 24',
+  fill: 'none',
+  stroke: 'currentColor',
+  strokeWidth: 1.75,
+  strokeLinecap: 'round' as const,
+  strokeLinejoin: 'round' as const,
+}
+
+function IconSliders() {
+  return (
+    <svg {...tablerProps}>
+      <path d="M4 6h11M18 6h2M4 12h2M9 12h11M4 18h13M20 18h0M17 18h0" />
+      <circle cx="16" cy="6" r="2" /><circle cx="7" cy="12" r="2" /><circle cx="15" cy="18" r="2" />
+    </svg>
+  )
+}
+function IconSparkles() {
+  return (
+    <svg {...tablerProps}>
+      <path d="M12 3l1.9 4.8L18.7 9.7 13.9 11.6 12 16.4 10.1 11.6 5.3 9.7 10.1 7.8z" />
+      <path d="M19 14l.6 1.6 1.6.6-1.6.6-.6 1.6-.6-1.6-1.6-.6 1.6-.6z" />
+    </svg>
+  )
+}
+function IconFilter() {
+  return (
+    <svg {...tablerProps}>
+      <path d="M4 4h16l-6 8v6l-4 2v-8z" />
+    </svg>
+  )
+}
+function IconEye() {
+  return (
+    <svg {...tablerProps}>
+      <circle cx="12" cy="12" r="2.5" />
+      <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z" />
+    </svg>
+  )
+}
+function IconArrowUpRight() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--ink)" strokeWidth={1.75} strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.7 }}>
+      <path d="M7 17L17 7M8 7h9v9" />
+    </svg>
   )
 }
 
@@ -203,141 +379,23 @@ function deriveStatus(
   return 'ready'
 }
 
-function StatusOverview({
-  generated,
-  validationStatus,
-  mappingCount,
-  totalFields,
-}: {
-  generated: boolean
-  validationStatus: ValidationResult['status'] | null
-  mappingCount: number
-  totalFields: number
-}) {
-  const status = deriveStatus(generated, validationStatus)
+// Small status pill for the hero eyebrow — a coloured dot does the colour work
+// against an otherwise neutral pill, in line with "colour as small accents".
+function StatusPill({ status }: { status: StatusKind }) {
   const meta = STATUS_META[status]
-  const pct = totalFields > 0 ? Math.min(100, (mappingCount / totalFields) * 100) : 0
-
   return (
-    <div className="ff-panel" style={{ padding: '16px' }}>
-      <div className="flex items-center gap-3">
-        <div
-          className="shrink-0 inline-flex items-center justify-center"
-          style={{
-            width: '40px',
-            height: '40px',
-            borderRadius: '50%',
-            background: meta.iconBg,
-            color: meta.iconColor,
-          }}
-        >
-          {meta.icon}
-        </div>
-        <div className="min-w-0">
-          <p
-            style={{
-              fontSize: '15px',
-              fontWeight: 600,
-              color: meta.titleColor,
-            }}
-          >
-            {meta.label}
-          </p>
-          <p style={{ fontSize: '11px', color: 'var(--color-text-tertiary)' }}>
-            {meta.subtitle}
-          </p>
-        </div>
-      </div>
-
-      <div className="mt-4">
-        <div className="flex items-center justify-between mb-1.5">
-          <span className="ff-label">Mapping progress</span>
-          <span style={{ fontSize: '11px', color: 'var(--color-text-secondary)' }}>
-            {mappingCount} of {totalFields} fields mapped
-          </span>
-        </div>
-        <div
-          style={{
-            height: '6px',
-            background: 'var(--color-background-secondary)',
-            borderRadius: '999px',
-            overflow: 'hidden',
-          }}
-        >
-          <div
-            style={{
-              width: `${pct}%`,
-              height: '100%',
-              background: 'var(--color-accent)',
-              transition: 'width 0.2s ease',
-            }}
-          />
-        </div>
-      </div>
-    </div>
+    <span className="wl-pill">
+      <span className="wl-dot" style={{ background: meta.dot }} />
+      {meta.label}
+    </span>
   )
 }
 
-const STATUS_META: Record<
-  StatusKind,
-  {
-    label: string
-    subtitle: string
-    iconBg: string
-    iconColor: string
-    titleColor: string
-    icon: React.ReactNode
-  }
-> = {
-  ready: {
-    label: 'Feed ready',
-    subtitle: 'Ready for Google Merchant Center',
-    iconBg: 'var(--color-badge-success-bg)',
-    iconColor: 'var(--color-badge-success-text)',
-    titleColor: 'var(--color-badge-success-text)',
-    icon: (
-      <svg width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-        <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-      </svg>
-    ),
-  },
-  warnings: {
-    label: 'Warnings',
-    subtitle: 'Feed works but can be improved',
-    iconBg: 'var(--color-badge-warning-bg)',
-    iconColor: 'var(--color-badge-warning-text)',
-    titleColor: 'var(--color-badge-warning-text)',
-    icon: (
-      <svg width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-        <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3m0 3.5h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
-      </svg>
-    ),
-  },
-  errors: {
-    label: 'Errors',
-    subtitle: 'Feed will be rejected by Google — fix before uploading',
-    iconBg: 'var(--color-badge-danger-bg)',
-    iconColor: 'var(--color-badge-danger-text)',
-    titleColor: 'var(--color-badge-danger-text)',
-    icon: (
-      <svg width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-        <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-      </svg>
-    ),
-  },
-  'not-generated': {
-    label: 'Not generated yet',
-    subtitle: 'Generate the feed to see its status',
-    iconBg: 'var(--color-background-secondary)',
-    iconColor: 'var(--color-text-tertiary)',
-    titleColor: 'var(--color-text-primary)',
-    icon: (
-      <svg width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-        <circle cx="12" cy="12" r="9" />
-        <path strokeLinecap="round" d="M12 8v4M12 16h.01" />
-      </svg>
-    ),
-  },
+const STATUS_META: Record<StatusKind, { label: string; dot: string }> = {
+  ready: { label: 'Feed ready', dot: 'var(--accent-green)' },
+  warnings: { label: 'Warnings', dot: 'var(--accent-amber)' },
+  errors: { label: 'Errors', dot: 'var(--accent-red)' },
+  'not-generated': { label: 'Not generated yet', dot: 'var(--ink-muted)' },
 }
 
 // ── Statistics ─────────────────────────────────────────────────────────────
@@ -356,37 +414,47 @@ function StatisticsSection({
   lastGenerated: string | null
 }) {
   return (
-    <div className="ff-panel">
-      <div className="ff-panel-header">Statistics</div>
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 p-3.5">
-        <StatCard label="Items in feed" value={feedItemCount != null ? String(feedItemCount) : '—'} />
-        <StatCard label="Included products" value={includedCount != null ? String(includedCount) : '—'} />
-        <StatCard label="Excluded products" value={excludedCount != null ? String(excludedCount) : '—'} />
-        <StatCard label="Last synced" value={formatDateTime(lastSynced)} />
-        <StatCard label="Last generated" value={formatDateTime(lastGenerated)} />
+    <div className="wl-card" style={{ overflow: 'hidden' }}>
+      {/* Three confident numbers, separated by hairlines — no boxed tiles. */}
+      <div className="grid grid-cols-3">
+        <StatCell first label="Items in feed" value={feedItemCount != null ? String(feedItemCount) : '—'} />
+        <StatCell label="Included" value={includedCount == null ? '…' : String(includedCount)} />
+        <StatCell
+          label="Excluded"
+          value={excludedCount == null ? '…' : excludedCount === 0 ? 'None' : String(excludedCount)}
+        />
+      </div>
+      <div
+        className="flex flex-wrap gap-x-8 gap-y-1"
+        style={{ padding: '13px 20px', borderTop: '1px solid var(--hairline)' }}
+      >
+        <Meta label="Last synced" value={formatDateTime(lastSynced)} />
+        <Meta label="Last generated" value={formatDateTime(lastGenerated)} />
       </div>
     </div>
   )
 }
 
-function StatCard({ label, value }: { label: string; value: string }) {
+function StatCell({ label, value, first }: { label: string; value: string; first?: boolean }) {
   return (
-    <div
-      style={{
-        padding: '10px 12px',
-        background: 'var(--color-background-tertiary)',
-        border: '1px solid var(--color-border-tertiary)',
-        borderRadius: '4px',
-      }}
-    >
-      <p className="ff-label">{label}</p>
+    <div style={{ padding: '18px 20px', borderLeft: first ? 'none' : '1px solid var(--hairline)' }}>
+      <p className="wl-eyebrow">{label}</p>
       <p
-        className="mt-1"
-        style={{ fontSize: '13px', fontWeight: 500, color: 'var(--color-text-primary)' }}
+        className="mt-2"
+        style={{ fontSize: '28px', fontWeight: 500, letterSpacing: '-0.02em', lineHeight: 1.05, color: 'var(--ink)' }}
       >
         {value}
       </p>
     </div>
+  )
+}
+
+function Meta({ label, value }: { label: string; value: string }) {
+  return (
+    <span className="inline-flex items-baseline gap-2" style={{ fontSize: '12px' }}>
+      <span className="wl-eyebrow">{label}</span>
+      <span style={{ color: 'var(--ink-secondary)' }}>{value}</span>
+    </span>
   )
 }
 
@@ -417,16 +485,18 @@ function NextSteps({
   isGenerating: boolean
 }) {
   return (
-    <div className="ff-panel">
-      <div className="ff-panel-header">Next steps</div>
-      <div className="p-3.5 space-y-2">
+    <div className="wl-card">
+      <div style={{ padding: '14px 18px', borderBottom: '1px solid var(--hairline)' }}>
+        <span style={{ fontSize: '15px', fontWeight: 500, color: 'var(--ink)' }}>Next steps</span>
+      </div>
+      <div className="p-4 space-y-3">
         <NextStepRow n={1}>
-          <Link href={`/feed/${feedId}/mapping`} className="ff-btn-secondary">
+          <Link href={`/feed/${feedId}/mapping`} className="wl-btn-secondary">
             Set up mapping
           </Link>
         </NextStepRow>
         <NextStepRow n={2}>
-          <Link href={`/feed/${feedId}/filters`} className="ff-btn-secondary">
+          <Link href={`/feed/${feedId}/filters`} className="wl-btn-secondary">
             Configure filters
           </Link>
         </NextStepRow>
@@ -435,7 +505,7 @@ function NextSteps({
             type="button"
             onClick={onGenerate}
             disabled={isGenerating}
-            className="ff-btn-primary"
+            className="wl-btn-primary"
           >
             {isGenerating ? 'Generating…' : 'Generate feed'}
           </button>
@@ -448,143 +518,25 @@ function NextSteps({
 function NextStepRow({ n, children }: { n: number; children: React.ReactNode }) {
   const labels = ['Set up mapping', 'Configure filters', 'Generate feed']
   return (
-    <div className="flex items-center gap-3">
+    <div className="flex items-center gap-3.5">
       <div
-        className="shrink-0 inline-flex items-center justify-center"
+        className="shrink-0 inline-flex items-center justify-center ff-mono"
         style={{
-          width: '24px',
-          height: '24px',
-          borderRadius: '50%',
-          background: 'var(--color-badge-accent-bg)',
-          color: 'var(--color-accent)',
+          width: '26px',
+          height: '26px',
+          borderRadius: '999px',
+          background: 'var(--ink)',
+          color: 'var(--bg-base)',
           fontSize: '11px',
-          fontWeight: 600,
+          fontWeight: 500,
         }}
       >
-        {n}
+        {String(n).padStart(2, '0')}
       </div>
-      <span
-        className="flex-1"
-        style={{ fontSize: '12px', color: 'var(--color-text-primary)' }}
-      >
-        Step {n}: {labels[n - 1]}
+      <span className="flex-1" style={{ fontSize: '13.5px', color: 'var(--ink)' }}>
+        {labels[n - 1]}
       </span>
       {children}
-    </div>
-  )
-}
-
-// ── Validation mini ────────────────────────────────────────────────────────
-
-function ValidationMini({
-  result,
-  isRunning,
-  onRun,
-  runError,
-  onShowDetails,
-}: {
-  result: ValidationResult | null
-  isRunning: boolean
-  onRun: () => void
-  runError: string | null
-  onShowDetails: () => void
-}) {
-  const errors = result?.issues.filter((i) => i.type === 'error') ?? []
-  const warnings = result?.issues.filter((i) => i.type === 'warning') ?? []
-  const issuesPreview = [...errors, ...warnings].slice(0, 3)
-  const remaining = (errors.length + warnings.length) - issuesPreview.length
-
-  let badgeClass = 'ff-badge ff-badge-neutral'
-  let badgeLabel = 'Not run'
-  if (result) {
-    if (result.status === 'errors') {
-      badgeClass = 'ff-badge ff-badge-danger'
-      badgeLabel = `${errors.length} ${errors.length === 1 ? 'error' : 'errors'}${warnings.length > 0 ? ` · ${warnings.length} ${warnings.length === 1 ? 'warning' : 'warnings'}` : ''}`
-    } else if (result.status === 'warnings') {
-      badgeClass = 'ff-badge ff-badge-warning'
-      badgeLabel = `${warnings.length} ${warnings.length === 1 ? 'warning' : 'warnings'}`
-    } else {
-      badgeClass = 'ff-badge ff-badge-success'
-      badgeLabel = 'No issues'
-    }
-  }
-
-  return (
-    <div className="ff-panel">
-      <div className="ff-panel-header">
-        <span>Validation</span>
-        <span className={badgeClass}>{badgeLabel}</span>
-      </div>
-      <div className="p-3.5 space-y-2.5">
-        {runError && (
-          <p style={{ fontSize: '11px', color: 'var(--color-badge-danger-text)' }}>{runError}</p>
-        )}
-
-        {!result && (
-          <p style={{ fontSize: '11px', color: 'var(--color-text-tertiary)' }}>
-            No validation run yet — click &quot;Run validation&quot; to check the feed.
-          </p>
-        )}
-
-        {result && issuesPreview.length === 0 && result.status === 'ok' && (
-          <p style={{ fontSize: '11px', color: 'var(--color-text-tertiary)' }}>
-            Feed meets Google&apos;s requirements.
-          </p>
-        )}
-
-        {issuesPreview.length > 0 && (
-          <ul className="space-y-1">
-            {issuesPreview.map((issue, i) => (
-              <li key={i} className="flex items-start gap-2" style={{ fontSize: '11px' }}>
-                <span
-                  className={`ff-badge ${issue.type === 'error' ? 'ff-badge-danger' : 'ff-badge-warning'} shrink-0`}
-                >
-                  {issue.type === 'error' ? 'Error' : 'Warning'}
-                </span>
-                <code
-                  className="ff-mono shrink-0"
-                  style={{ color: 'var(--color-text-secondary)' }}
-                >
-                  {issue.field}
-                </code>
-                <span
-                  className="flex-1 min-w-0 truncate"
-                  style={{ color: 'var(--color-text-primary)' }}
-                >
-                  {issue.message}
-                </span>
-              </li>
-            ))}
-            {remaining > 0 && (
-              <li
-                style={{ fontSize: '11px', color: 'var(--color-text-tertiary)', paddingLeft: '4px' }}
-              >
-                +{remaining} more…
-              </li>
-            )}
-          </ul>
-        )}
-
-        <div className="flex gap-2 pt-1">
-          <button
-            type="button"
-            onClick={onRun}
-            disabled={isRunning}
-            className="ff-btn-primary"
-          >
-            {isRunning ? 'Validating…' : 'Run validation'}
-          </button>
-          {result && (
-            <button
-              type="button"
-              onClick={onShowDetails}
-              className="ff-btn-secondary"
-            >
-              See all details
-            </button>
-          )}
-        </div>
-      </div>
     </div>
   )
 }
