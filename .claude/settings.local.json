@@ -63,7 +63,27 @@
       "Bash(git commit -m ' *)",
       "Bash(node --env-file=.env.local --import tsx _verify_login.ts)",
       "Bash(node --env-file=.env.local --import tsx _inspect_users.ts)",
-      "Bash(git restore *)"
+      "Bash(git restore *)",
+      "PowerShell(npx tsc --noEmit 2>&1 | Select-Object -First 40)",
+      "PowerShell(npx next build 2>&1 | Select-Object -Last 30)",
+      "PowerShell(npx tsc --noEmit 2>&1 | Select-Object -First 30)",
+      "Read(//c/Users/kenne/AppData/Local/Temp/claude/C--Users-kenne-km-product-feed-generator/b09e0e64-4372-43dc-99a0-72e9ab9e5413/tasks/**)",
+      "PowerShell(npx tsc --noEmit 2>&1 | Select-Object -First 20)",
+      "PowerShell(npx eslint app/dashboard/ProductsTable.tsx app/products/ProductsClient.tsx app/settings/SettingsClient.tsx app/optimize/BucketScopeTab.tsx app/api/metafield-names/route.ts 2>&1 | Select-Object -First 40)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:3000/login)",
+      "PowerShell(npx tsc --noEmit 2>&1 | Select-Object -First 20; Write-Output \"---LINT---\"; npx eslint app/feed/FeedClient.tsx 2>&1 | Select-Object -First 20)",
+      "PowerShell(npx tsc --noEmit 2>&1 | Select-Object -First 25; Write-Output \"---LINT---\"; npx eslint app/projects/ProjectListClient.tsx app/settings/SettingsClient.tsx app/preview/PreviewClient.tsx app/dashboard/FeedListClient.tsx app/feed/FeedClient.tsx app/components/Sidebar.tsx app/optimize/BucketListPanel.tsx 2>&1 | Select-Object -First 40)",
+      "Read(//c/Users/kenne/.claude/**)",
+      "PowerShell(npx tsc --noEmit 2>&1 | Select-Object -First 25; Write-Output \"---LINT---\"; npx eslint app/feed/FeedClient.tsx app/feed/FeedValidation.tsx app/dashboard/FeedSection.tsx 2>&1 | Select-Object -First 30)",
+      "Bash(taskkill /PID 29824 /F)",
+      "Bash(curl -s -o /dev/null -w \"3000=%{http_code}\\\\n\" http://localhost:3000/login)",
+      "PowerShell(try { Stop-Process -Id 29824 -Force -ErrorAction Stop; \"killed 29824\" } catch { \"already gone: $\\($_.Exception.Message\\)\" }; Start-Sleep -Seconds 1; $p = Get-NetTCPConnection -LocalPort 3000 -State Listen -ErrorAction SilentlyContinue; if \\($p\\) { \"port 3000 still held by PID $\\($p.OwningProcess\\)\" } else { \"port 3000 free\" })",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" http://localhost:3000/login)",
+      "PowerShell(npx tsc --noEmit 2>&1 | Select-Object -First 15; if \\($?\\) { \"tsc clean\" })",
+      "PowerShell(npx tsc --noEmit 2>&1 | Select-Object -First 25; if \\($?\\) { \"tsc clean\" })",
+      "PowerShell(npx eslint app/feed/FeedClient.tsx app/feed/FeedValidation.tsx app/dashboard/FeedSection.tsx 2>&1 | Select-Object -First 30)",
+      "PowerShell($c = Get-NetTCPConnection -LocalPort 3000 -State Listen -ErrorAction SilentlyContinue; if \\($c\\) { $c.OwningProcess | Select-Object -Unique | ForEach-Object { try { Stop-Process -Id $_ -Force -ErrorAction Stop; \"killed PID $_\" } catch { \"could not kill $_\" } } } else { \"port 3000 already free\" }; Start-Sleep -Seconds 1; if \\(Get-NetTCPConnection -LocalPort 3000 -State Listen -ErrorAction SilentlyContinue\\) { \"still held\" } else { \"port 3000 free\" })",
+      "PowerShell(try { Remove-Item -Recurse -Force \"C:\\\\Users\\\\kenne\\\\km-product-feed-generator\\\\.next\" -ErrorAction Stop; \".next cleared\" } catch { \"clear note: $\\($_.Exception.Message\\)\" })"
     ]
   }
 }
