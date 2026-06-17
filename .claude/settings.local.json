@@ -52,7 +52,15 @@
       "PowerShell(npx eslint lib/bucketExamples.ts app/optimize/actions.ts app/optimize/BucketWorkshopTab.tsx scripts/verify-bucket-examples.ts scripts/workshop-cli.ts)",
       "Read(//c/Users/kenne/AppData/Local/Temp/claude/C--Users-kenne-km-product-feed-generator/b2ab0fa5-b858-447a-9e4c-2e69d6d99ada/tasks/**)",
       "Bash(break)",
-      "PowerShell($p = \\(Get-NetTCPConnection -LocalPort 3000 -State Listen -ErrorAction SilentlyContinue\\).OwningProcess; if \\($p\\) { Stop-Process -Id $p -Force; \"stopped dev server \\(pid $p\\)\" } else { \"no listener on 3000\" })"
+      "PowerShell($p = \\(Get-NetTCPConnection -LocalPort 3000 -State Listen -ErrorAction SilentlyContinue\\).OwningProcess; if \\($p\\) { Stop-Process -Id $p -Force; \"stopped dev server \\(pid $p\\)\" } else { \"no listener on 3000\" })",
+      "PowerShell(npx tsx scripts/check-shopify-readonly.ts)",
+      "Bash(node -e \"const p=require\\('./package.json'\\); console.log\\(JSON.stringify\\(p.scripts,null,2\\)\\)\")",
+      "Bash(node -e \"require\\('dotenv'\\).config\\({path:'.env.local'}\\); ['ANTHROPIC_API_KEY','NEXT_PUBLIC_SUPABASE_URL','SUPABASE_SERVICE_ROLE_KEY','TOKEN_ENCRYPTION_KEY','SHOPIFY_SHOP_URL'].forEach\\(k=>console.log\\(k+': '+\\(process.env[k]?\\('set \\('+process.env[k].length+' chars\\)'\\):'MISSING'\\)\\)\\)\")",
+      "Bash(node -e \"try{console.log\\('playwright:',require\\('playwright/package.json'\\).version\\)}catch\\(e\\){try{console.log\\('playwright-core:',require\\('playwright-core/package.json'\\).version\\)}catch\\(e2\\){console.log\\('no playwright pkg'\\)}}\")",
+      "Bash(node --env-file=.env.local --import tsx /tmp/recon.ts)",
+      "Bash(node --env-file=.env.local --import tsx /tmp/ab-multi.ts)",
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)"
     ]
   }
 }
