@@ -8,6 +8,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { createShopifyClient, type ShopifyClient, type ShopifyCredentials } from '@/lib/shopify'
 import { decryptToken } from '@/lib/crypto'
+import { AppError, dbError } from '@/lib/errors'
 
 type ProjectCredsRow = {
   shop_url: string | null
@@ -28,15 +29,15 @@ export async function getProjectCredentials(
     .eq('id', projectId)
     .maybeSingle<ProjectCredsRow>()
 
-  if (error) throw new Error(`Kunne ikke hente project-credentials: ${error.message}`)
-  if (!data) throw new Error('Project ikke fundet')
+  if (error) dbError('getProjectCredentials', error)
+  if (!data) throw new AppError('Projektet blev ikke fundet', 404)
   if (
     !data.shop_url ||
     !data.access_token_ciphertext ||
     !data.access_token_iv ||
     !data.access_token_tag
   ) {
-    throw new Error('Projectet har ingen Shopify-forbindelse konfigureret endnu')
+    throw new AppError('Projektet har ingen Shopify-forbindelse konfigureret endnu')
   }
 
   const accessToken = decryptToken({

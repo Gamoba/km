@@ -1,132 +1,79 @@
 'use client'
 
 import { useActionState } from 'react'
-import { signIn, signUp, type AuthState } from './actions'
-import { useState } from 'react'
+import { signIn, type AuthState } from './actions'
 
 const initialState: AuthState = { error: null, mode: 'login' }
 
+// Login only. Self-service signup is closed (security hardening M1) — new
+// accounts are created manually in the Supabase dashboard, so there is no
+// "create account" path here.
 export default function LoginPage() {
-  const [mode, setMode] = useState<'login' | 'signup'>('login')
-  const [loginState, loginAction, isLoginPending] = useActionState(signIn, initialState)
-  const [signupState, signupAction, isSignupPending] = useActionState(signUp, initialState)
-
-  const state = mode === 'login' ? loginState : signupState
-  const formAction = mode === 'login' ? loginAction : signupAction
-  const isPending = mode === 'login' ? isLoginPending : isSignupPending
+  const [state, formAction, isPending] = useActionState(signIn, initialState)
 
   return (
     <main className="min-h-screen flex items-center justify-center bg-gray-50 px-4">
       <div className="w-full max-w-sm">
         <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-8">
-          <h1 className="text-2xl font-semibold text-gray-900 mb-2">
-            {mode === 'login' ? 'Sign in' : 'Create account'}
-          </h1>
+          <h1 className="text-2xl font-semibold text-gray-900 mb-2">Sign in</h1>
           <p className="text-sm text-gray-500 mb-6">
-            {mode === 'login'
-              ? 'Sign in with your email and password.'
-              : 'Create a new account with email and password.'}
+            Sign in with your email and password.
           </p>
 
-          {mode === 'signup' && signupState.error === null && signupState !== initialState ? (
-            <div className="rounded-xl bg-green-50 border border-green-200 p-4 text-center">
-              <p className="text-sm font-medium text-green-800">Account created</p>
-              <p className="text-sm text-green-700 mt-1">
-                You can now sign in with your email and password.
-              </p>
-              <button
-                onClick={() => setMode('login')}
-                className="mt-3 text-sm font-medium text-green-800 underline"
+          <form action={formAction} className="space-y-4">
+            <div>
+              <label
+                htmlFor="email"
+                className="block text-sm font-medium text-gray-700 mb-1.5"
               >
-                Go to sign in
-              </button>
-            </div>
-          ) : (
-            <form action={formAction} className="space-y-4">
-              <div>
-                <label
-                  htmlFor="email"
-                  className="block text-sm font-medium text-gray-700 mb-1.5"
-                >
-                  Email address
-                </label>
-                <input
-                  id="email"
-                  name="email"
-                  type="email"
-                  autoComplete="email"
-                  required
-                  placeholder="you@example.com"
-                  className="w-full rounded-lg border border-gray-300 bg-white px-3.5 py-2.5 text-sm text-gray-900 placeholder-gray-400 shadow-xs focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 disabled:opacity-50"
-                  disabled={isPending}
-                />
-              </div>
-
-              <div>
-                <label
-                  htmlFor="password"
-                  className="block text-sm font-medium text-gray-700 mb-1.5"
-                >
-                  Password
-                </label>
-                <input
-                  id="password"
-                  name="password"
-                  type="password"
-                  autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
-                  required
-                  minLength={6}
-                  placeholder="••••••••"
-                  className="w-full rounded-lg border border-gray-300 bg-white px-3.5 py-2.5 text-sm text-gray-900 placeholder-gray-400 shadow-xs focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 disabled:opacity-50"
-                  disabled={isPending}
-                />
-              </div>
-
-              {state.error && (
-                <p className="text-sm text-red-600" role="alert">
-                  {state.error}
-                </p>
-              )}
-
-              <button
-                type="submit"
+                Email address
+              </label>
+              <input
+                id="email"
+                name="email"
+                type="email"
+                autoComplete="email"
+                required
+                placeholder="you@example.com"
+                className="w-full rounded-lg border border-gray-300 bg-white px-3.5 py-2.5 text-sm text-gray-900 placeholder-gray-400 shadow-xs focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 disabled:opacity-50"
                 disabled={isPending}
-                className="w-full rounded-lg bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white shadow-xs hover:bg-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 disabled:opacity-60 disabled:cursor-not-allowed transition-colors"
-              >
-                {isPending
-                  ? 'Please wait…'
-                  : mode === 'login'
-                  ? 'Sign in'
-                  : 'Create account'}
-              </button>
+              />
+            </div>
 
-              <p className="text-center text-sm text-gray-500">
-                {mode === 'login' ? (
-                  <>
-                    No account?{' '}
-                    <button
-                      type="button"
-                      onClick={() => setMode('signup')}
-                      className="font-medium text-indigo-600 hover:text-indigo-500"
-                    >
-                      Create one here
-                    </button>
-                  </>
-                ) : (
-                  <>
-                    Already have an account?{' '}
-                    <button
-                      type="button"
-                      onClick={() => setMode('login')}
-                      className="font-medium text-indigo-600 hover:text-indigo-500"
-                    >
-                      Sign in
-                    </button>
-                  </>
-                )}
+            <div>
+              <label
+                htmlFor="password"
+                className="block text-sm font-medium text-gray-700 mb-1.5"
+              >
+                Password
+              </label>
+              <input
+                id="password"
+                name="password"
+                type="password"
+                autoComplete="current-password"
+                required
+                minLength={6}
+                placeholder="••••••••"
+                className="w-full rounded-lg border border-gray-300 bg-white px-3.5 py-2.5 text-sm text-gray-900 placeholder-gray-400 shadow-xs focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 disabled:opacity-50"
+                disabled={isPending}
+              />
+            </div>
+
+            {state.error && (
+              <p className="text-sm text-red-600" role="alert">
+                {state.error}
               </p>
-            </form>
-          )}
+            )}
+
+            <button
+              type="submit"
+              disabled={isPending}
+              className="w-full rounded-lg bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white shadow-xs hover:bg-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 disabled:opacity-60 disabled:cursor-not-allowed transition-colors"
+            >
+              {isPending ? 'Please wait…' : 'Sign in'}
+            </button>
+          </form>
         </div>
       </div>
     </main>

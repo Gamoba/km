@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { createSupabaseServerClient } from '@/lib/supabase-server'
 import { adminDb, getOwnedProject } from '@/lib/feeds'
+import { errorResponse } from '@/lib/errors'
 import type { ValidationIssue } from '@/lib/feedValidator'
 
 export async function GET(req: Request) {
@@ -109,11 +110,7 @@ export async function GET(req: Request) {
 
     caches = (cacheResult.data as CacheRow[] | null) ?? []
   } catch (err) {
-    console.error('[/api/feeds] dashboard data fetch failed:', err)
-    return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Unknown server error' },
-      { status: 500 }
-    )
+    return errorResponse(err, 'GET /api/feeds dashboard data')
   }
 
   const cacheByFeed = new Map<string, CacheRow>()
@@ -181,7 +178,7 @@ export async function POST(req: Request) {
     .select('id, name, description, project_id, created_at, updated_at')
     .single()
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (error) return errorResponse(error, 'POST /api/feeds')
 
   return NextResponse.json({ feed: data })
 }

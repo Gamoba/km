@@ -1,5 +1,6 @@
 import { createSupabaseServerClient } from '@/lib/supabase-server'
 import { getOwnedFeed } from '@/lib/feeds'
+import { errorResponse } from '@/lib/errors'
 import { countFilteredProducts } from '@/lib/feedGenerator'
 
 // LAG 2 endpoint for the feed overview page. countFilteredProducts paginates
@@ -29,9 +30,6 @@ export async function GET(
       excluded,
     })
   } catch (err) {
-    return Response.json(
-      { error: err instanceof Error ? err.message : 'Unknown error' },
-      { status: 500 }
-    )
+    return errorResponse(err, 'GET /api/feeds/[feedId]/counts')
   }
 }

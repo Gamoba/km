@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { createSupabaseServerClient } from '@/lib/supabase-server'
 import { adminDb, getOwnedProject } from '@/lib/feeds'
+import { errorResponse } from '@/lib/errors'
 
 // DELETE — remove a project. ON DELETE CASCADE on feeds.project_id (migration
 // 019) removes the project's feeds, and from there the existing feed_id
@@ -26,7 +27,7 @@ export async function DELETE(
     .delete()
     .eq('id', projectId)
     .eq('user_id', user.id)
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (error) return errorResponse(error, 'DELETE /api/projects/[projectId]')
 
   return NextResponse.json({ ok: true })
 }
@@ -67,6 +68,6 @@ export async function PATCH(
     .select('id, name, description, shop_url, connection_status, last_verified_at, created_at, updated_at')
     .single()
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (error) return errorResponse(error, 'PATCH /api/projects/[projectId]')
   return NextResponse.json({ project: data })
 }

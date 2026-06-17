@@ -1,6 +1,8 @@
 import { createSupabaseServerClient } from '@/lib/supabase-server'
 import { syncProducts } from '@/lib/sync'
 import { getOwnedFeed } from '@/lib/feeds'
+import { enforceRateLimit } from '@/lib/rateLimit'
+import { errorResponse } from '@/lib/errors'
 
 export async function POST(req: Request) {
   const supabase = await createSupabaseServerClient()
@@ -24,12 +26,11 @@ export async function POST(req: Request) {
   }
 
   try {
+    // Cost/abuse guard: cap full syncs per user (Shopify API load).
+    await enforceRateLimit(user.id, 'shopify_sync')
     const result = await syncProducts(feedId)
     return Response.json(result)
   } catch (err) {
-    return Response.json(
-      { error: err instanceof Error ? err.message : 'Unknown error' },
-      { status: 500 }
-    )
+    return errorResponse(err, 'POST /api/shopify/sync')
   }
 }

@@ -1,5 +1,6 @@
 import { createSupabaseServerClient } from '@/lib/supabase-server'
 import { adminDb, getOwnedFeed } from '@/lib/feeds'
+import { errorResponse } from '@/lib/errors'
 import { toShopifyData, type SupabaseProduct } from '@/lib/sync'
 
 const ALLOWED_PAGE_SIZES = [20, 25, 50, 100, 200] as const
@@ -133,9 +134,6 @@ export async function GET(req: Request) {
       totalPages,
     })
   } catch (err) {
-    return Response.json(
-      { error: err instanceof Error ? err.message : 'Unknown error' },
-      { status: 500 }
-    )
+    return errorResponse(err, 'GET /api/products')
   }
 }

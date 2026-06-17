@@ -6,6 +6,8 @@
 
 import { createSupabaseServerClient } from '@/lib/supabase-server'
 import { getOwnedFeed } from '@/lib/feeds'
+import { enforceRateLimit } from '@/lib/rateLimit'
+import { clientMessage } from '@/lib/errors'
 import * as svc from '@/lib/titleOptimizationService'
 import * as buckets from '@/lib/optimizationBuckets'
 import * as workshop from '@/lib/bucketExamples'
@@ -30,12 +32,12 @@ async function requireOwnedFeed(feedId: string): Promise<{ userId: string } | { 
 async function requireOwnedBucket(
   feedId: string,
   bucketId: string
-): Promise<{ ok: true } | { error: string }> {
+): Promise<{ userId: string } | { error: string }> {
   const g = await requireOwnedFeed(feedId)
   if ('error' in g) return g
   const bucket = await buckets.getBucket(feedId, bucketId)
   if (!bucket) return { error: 'Bucket ikke fundet' }
-  return { ok: true }
+  return { userId: g.userId }
 }
 
 // ── Settings ─────────────────────────────────────────────────────────────────
@@ -190,9 +192,12 @@ export async function runOptimization(
   const g = await requireOwnedFeed(feedId)
   if ('error' in g) return g
   try {
+    // Volume budget: charge the day's product quota by how many this run targets.
+    const plan = await svc.planOptimization(feedId, choice)
+    await enforceRateLimit(g.userId, 'optimize_products_daily', plan.targets.length)
     return { data: await svc.runOptimization(feedId, method, choice) }
   } catch (e) {
-    return { error: (e as Error).message }
+    return { error: clientMessage(e, 'runOptimization') }
   }
 }
 
@@ -220,9 +225,10 @@ export async function previewOptimization(
   const g = await requireOwnedFeed(feedId)
   if ('error' in g) return g
   try {
+    await enforceRateLimit(g.userId, 'workshop_generate')
     return { data: await svc.previewOptimization(feedId, method, limit) }
   } catch (e) {
-    return { error: (e as Error).message }
+    return { error: clientMessage(e, 'previewOptimization') }
   }
 }
 
@@ -236,9 +242,11 @@ export async function runOptimizationForRefs(
   const g = await requireOwnedFeed(feedId)
   if ('error' in g) return g
   try {
+    // Volume budget: charge this chunk's product count (accumulates over chunks).
+    await enforceRateLimit(g.userId, 'optimize_products_daily', refs.length)
     return { data: await svc.runOptimizationForRefs(feedId, method, refs) }
   } catch (e) {
-    return { error: (e as Error).message }
+    return { error: clientMessage(e, 'runOptimizationForRefs') }
   }
 }
 
@@ -550,9 +558,11 @@ export async function runBucketRefs(
   const g = await requireOwnedBucket(feedId, bucketId)
   if ('error' in g) return g
   try {
+    // Volume budget: charge this chunk's product count (accumulates over chunks).
+    await enforceRateLimit(g.userId, 'optimize_products_daily', refs.length)
     return { data: await buckets.runBucketRefs(feedId, bucketId, refs) }
   } catch (e) {
-    return { error: (e as Error).message }
+    return { error: clientMessage(e, 'runBucketRefs') }
   }
 }
 
@@ -564,9 +574,10 @@ export async function previewBucket(
   const g = await requireOwnedBucket(feedId, bucketId)
   if ('error' in g) return g
   try {
+    await enforceRateLimit(g.userId, 'workshop_generate')
     return { data: await buckets.previewBucket(feedId, bucketId, limit) }
   } catch (e) {
-    return { error: (e as Error).message }
+    return { error: clientMessage(e, 'previewBucket') }
   }
 }
 
@@ -739,9 +750,10 @@ export async function generateBucketCandidates(
   const g = await requireOwnedBucket(feedId, bucketId)
   if ('error' in g) return g
   try {
+    await enforceRateLimit(g.userId, 'workshop_generate')
     return { data: await workshop.generateBucketCandidates(feedId, bucketId) }
   } catch (e) {
-    return { error: (e as Error).message }
+    return { error: clientMessage(e, 'generateBucketCandidates') }
   }
 }
 

@@ -5,6 +5,7 @@
 
 import { adminDb } from '@/lib/feeds'
 import { getMetafieldNameMap } from '@/lib/metafieldDefinitions'
+import { dbError } from '@/lib/errors'
 import type { SupabaseProduct } from '@/lib/sync'
 import { getOptimizationScope, type OverlapSummary } from '@/lib/titleOptimizationScope'
 import type { FeedFilter } from '@/lib/feedFilters'
@@ -77,7 +78,7 @@ export async function saveOptimizationSettings(
     },
     { onConflict: 'feed_id' }
   )
-  if (error) throw new Error(error.message)
+  if (error) dbError('titleOptimizationService', error)
 }
 
 // ── Optimization filters (the separate scope filter set) ─────────────────────
@@ -115,7 +116,7 @@ export async function saveOptimizationFilters(
     ],
     { onConflict: 'feed_id,filter_type' }
   )
-  if (error) throw new Error(error.message)
+  if (error) dbError('titleOptimizationService', error)
 }
 
 // ── Overlap (pre-run summary) ────────────────────────────────────────────────
@@ -170,7 +171,7 @@ export async function saveTitleRule(feedId: string, rule: TitleRule): Promise<vo
     },
     { onConflict: 'feed_id,product_type' }
   )
-  if (error) throw new Error(error.message)
+  if (error) dbError('titleOptimizationService', error)
 }
 
 export async function deleteTitleRule(feedId: string, productType: string): Promise<void> {
@@ -180,7 +181,7 @@ export async function deleteTitleRule(feedId: string, productType: string): Prom
     .delete()
     .eq('feed_id', feedId)
     .eq('product_type', productType)
-  if (error) throw new Error(error.message)
+  if (error) dbError('titleOptimizationService', error)
 }
 
 // ── Manual edit ──────────────────────────────────────────────────────────────
@@ -230,7 +231,7 @@ export async function saveManualTitle(
     },
     { onConflict: 'feed_id,product_ref' }
   )
-  if (error) throw new Error(error.message)
+  if (error) dbError('titleOptimizationService', error)
 }
 
 // ── Review (needs_review queue) ──────────────────────────────────────────────
@@ -256,7 +257,7 @@ export async function listBucketReview(feedId: string, bucketId: string): Promis
     .eq('bucket_id', bucketId)
     .eq('status', 'needs_review')
     .order('updated_at', { ascending: false })
-  if (error) throw new Error(error.message)
+  if (error) dbError('titleOptimizationService', error)
   return ((data ?? []) as Record<string, unknown>[]).map((r) => ({
     product_ref: r.product_ref as string,
     original_title: r.original_title as string,

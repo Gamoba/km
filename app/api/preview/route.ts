@@ -1,5 +1,6 @@
 import { createSupabaseServerClient } from '@/lib/supabase-server'
 import { getOwnedFeed } from '@/lib/feeds'
+import { errorResponse } from '@/lib/errors'
 import { generatePreview } from '@/lib/feedGenerator'
 
 const DEFAULT_LIMIT = 100
@@ -32,9 +33,6 @@ export async function GET(req: Request) {
     const data = await generatePreview(feedId, limit)
     return Response.json(data)
   } catch (err) {
-    return Response.json(
-      { error: err instanceof Error ? err.message : 'Unknown error' },
-      { status: 500 }
-    )
+    return errorResponse(err, 'GET /api/preview')
   }
 }

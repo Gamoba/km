@@ -1,6 +1,7 @@
 import { createSupabaseServerClient } from '@/lib/supabase-server'
 import { adminDb, getOwnedProject } from '@/lib/feeds'
 import { createShopifyClientForProject } from '@/lib/projectShopify'
+import { errorResponse } from '@/lib/errors'
 
 export async function GET(req: Request) {
   const supabase = await createSupabaseServerClient()
@@ -28,9 +29,6 @@ export async function GET(req: Request) {
     const data = await shopify.fetchProductsWithAllData()
     return Response.json(data)
   } catch (err) {
-    return Response.json(
-      { error: err instanceof Error ? err.message : 'Unknown error' },
-      { status: 500 }
-    )
+    return errorResponse(err, 'GET /api/shopify/products')
   }
 }

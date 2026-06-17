@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { createSupabaseServerClient } from '@/lib/supabase-server'
 import { adminDb, type ProjectRow } from '@/lib/feeds'
+import { errorResponse } from '@/lib/errors'
 
 // GET — list the user's projects with feed counts + connection status.
 // Never returns the encrypted token columns.
@@ -19,7 +20,7 @@ export async function GET() {
     .eq('user_id', user.id)
     .order('created_at', { ascending: true })
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (error) return errorResponse(error, 'GET /api/projects')
 
   const projectIds = (projects ?? []).map((p) => p.id)
 
@@ -90,7 +91,7 @@ export async function POST(req: Request) {
     .select('id, name, description, shop_url, connection_status, last_verified_at, created_at, updated_at')
     .single<ProjectRow>()
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (error) return errorResponse(error, 'POST /api/projects')
 
   return NextResponse.json({ project: data })
 }

@@ -3,6 +3,8 @@ import { createSupabaseServerClient } from '@/lib/supabase-server'
 import Anthropic from '@anthropic-ai/sdk'
 import type { SupabaseProduct } from '@/lib/sync'
 import { adminDb, getOwnedFeed } from '@/lib/feeds'
+import { enforceRateLimit } from '@/lib/rateLimit'
+import { errorResponse } from '@/lib/errors'
 
 function adminClient() {
   return adminDb()
@@ -216,6 +218,13 @@ export async function POST(req: Request) {
 
   const owned = await getOwnedFeed(user.id, feedId)
   if (!owned) return NextResponse.json({ error: 'Feed not found' }, { status: 404 })
+
+  // Cost guard: cap AI-suggestion calls per user (Anthropic spend).
+  try {
+    await enforceRateLimit(user.id, 'ai_suggest')
+  } catch (err) {
+    return errorResponse(err, 'POST /api/mapping/ai-suggest')
+  }
 
   // Existing mappings come from the client (live state — may include unsaved
   // changes the user just made). The route used to load these from

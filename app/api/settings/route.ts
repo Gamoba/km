@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { createSupabaseServerClient } from '@/lib/supabase-server'
 import { adminDb, getOwnedFeed } from '@/lib/feeds'
+import { errorResponse } from '@/lib/errors'
 
 type ShopSettingsBody = {
   feed_id: string
@@ -63,6 +64,6 @@ export async function POST(req: Request) {
     { onConflict: 'feed_id' }
   )
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (error) return errorResponse(error, 'POST /api/settings')
   return NextResponse.json({ ok: true })
 }

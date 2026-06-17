@@ -12,6 +12,7 @@
 import { adminDb } from '@/lib/feeds'
 import type { SupabaseProduct } from '@/lib/sync'
 import { applyFeedFilters, type FeedFilter } from '@/lib/feedFilters'
+import { dbError } from '@/lib/errors'
 import { getMetafieldNameMap } from '@/lib/metafieldDefinitions'
 import {
   fetchAllActiveProducts,
@@ -108,7 +109,7 @@ async function fetchProductsByRefs(feedId: string, refs: string[]): Promise<Supa
       .select('*, metafields:product_metafields(*)')
       .eq('feed_id', feedId)
       .in('shopify_id', refs.slice(i, i + IN_CHUNK))
-    if (error) throw new Error(`Products failed: ${error.message}`)
+    if (error) dbError('optimizationBuckets products', error)
     out.push(...((data ?? []) as SupabaseProduct[]))
   }
   return out
@@ -215,7 +216,7 @@ export async function createBucket(
     .insert({ feed_id: feedId, name: trimmed, method })
     .select('*')
     .single()
-  if (error) throw new Error(error.message)
+  if (error) dbError('optimizationBuckets', error)
   return data as Bucket
 }
 
@@ -227,7 +228,7 @@ export async function renameBucket(feedId: string, bucketId: string, name: strin
     .update({ name: trimmed, updated_at: new Date().toISOString() })
     .eq('id', bucketId)
     .eq('feed_id', feedId)
-  if (error) throw new Error(error.message)
+  if (error) dbError('optimizationBuckets', error)
 }
 
 export async function setBucketMethod(
@@ -240,7 +241,7 @@ export async function setBucketMethod(
     .update({ method, updated_at: new Date().toISOString() })
     .eq('id', bucketId)
     .eq('feed_id', feedId)
-  if (error) throw new Error(error.message)
+  if (error) dbError('optimizationBuckets', error)
 }
 
 export async function deleteBucket(feedId: string, bucketId: string): Promise<void> {
@@ -249,7 +250,7 @@ export async function deleteBucket(feedId: string, bucketId: string): Promise<vo
     .delete()
     .eq('id', bucketId)
     .eq('feed_id', feedId)
-  if (error) throw new Error(error.message)
+  if (error) dbError('optimizationBuckets', error)
 }
 
 // ── Per-bucket filters ───────────────────────────────────────────────────────
@@ -284,7 +285,7 @@ export async function saveBucketFilters(
       ],
       { onConflict: 'bucket_id,filter_type' }
     )
-  if (error) throw new Error(error.message)
+  if (error) dbError('optimizationBuckets', error)
 }
 
 // ── Per-bucket rules (Method B) ──────────────────────────────────────────────
@@ -322,7 +323,7 @@ export async function saveBucketRule(
       },
       { onConflict: 'bucket_id,product_type' }
     )
-  if (error) throw new Error(error.message)
+  if (error) dbError('optimizationBuckets', error)
 }
 
 export async function deleteBucketRule(bucketId: string, productType: string): Promise<void> {
@@ -331,7 +332,7 @@ export async function deleteBucketRule(bucketId: string, productType: string): P
     .delete()
     .eq('bucket_id', bucketId)
     .eq('product_type', productType)
-  if (error) throw new Error(error.message)
+  if (error) dbError('optimizationBuckets', error)
 }
 
 // ── Membership & overlap ─────────────────────────────────────────────────────
@@ -368,7 +369,7 @@ export async function getFeedMetafields(feedId: string): Promise<FeedMetafield[]
       .select('namespace, key')
       .eq('feed_id', feedId)
       .range(from, from + PAGE - 1)
-    if (error) throw new Error(`Metafields failed: ${error.message}`)
+    if (error) dbError('optimizationBuckets metafields', error)
     const rows = (data ?? []) as { namespace: string; key: string }[]
     for (const r of rows) {
       const k = `${r.namespace}.${r.key}`
@@ -411,7 +412,7 @@ export async function setBucketCustomLabel(
     })
     .eq('id', bucketId)
     .eq('feed_id', feedId)
-  if (error) throw new Error(error.message)
+  if (error) dbError('optimizationBuckets', error)
 }
 
 // Which custom_label_N indices are already set by a feed-level mapping. The feed
@@ -530,7 +531,7 @@ export async function setBucketMembership(
       const { error } = await db()
         .from('bucket_products')
         .upsert(rows.slice(i, i + 500), { onConflict: 'feed_id,product_ref' })
-      if (error) throw new Error(error.message)
+      if (error) dbError('optimizationBuckets', error)
     }
   }
 
@@ -546,7 +547,7 @@ export async function setBucketMembership(
       .eq('bucket_id', bucketId)
       .eq('source', 'filter')
       .in('product_ref', toDelete.slice(i, i + IN_CHUNK))
-    if (error) throw new Error(error.message)
+    if (error) dbError('optimizationBuckets', error)
   }
 }
 
@@ -563,7 +564,7 @@ export async function addManualProducts(feedId: string, bucketId: string, refs: 
     const { error } = await db()
       .from('bucket_products')
       .upsert(rows.slice(i, i + 500), { onConflict: 'feed_id,product_ref' })
-    if (error) throw new Error(error.message)
+    if (error) dbError('optimizationBuckets', error)
   }
 }
 
@@ -577,7 +578,7 @@ export async function removeManualProduct(feedId: string, bucketId: string, ref:
     .eq('bucket_id', bucketId)
     .eq('product_ref', ref)
     .eq('source', 'manual')
-  if (error) throw new Error(error.message)
+  if (error) dbError('optimizationBuckets', error)
 }
 
 // The bucket's manually-added products (source='manual'), with titles for the UI.
@@ -624,7 +625,7 @@ export async function searchFeedProducts(
     .eq('status', 'active')
     .or(`title.ilike.${like},vendor.ilike.${like}`)
     .limit(limit)
-  if (error) throw new Error(`Product search failed: ${error.message}`)
+  if (error) dbError('optimizationBuckets product search', error)
   return ((data ?? []) as { shopify_id: string; title: string | null; vendor: string | null; images: { src?: string }[] | null }[]).map(
     (p) => ({
       product_ref: p.shopify_id,

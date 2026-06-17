@@ -2,6 +2,8 @@ import { createSupabaseServerClient } from '@/lib/supabase-server'
 import { generateFeed } from '@/lib/feedGenerator'
 import { validateFeed, type ValidationResult } from '@/lib/feedValidator'
 import { adminDb, getOwnedFeed } from '@/lib/feeds'
+import { enforceRateLimit, RateLimitError } from '@/lib/rateLimit'
+import { errorResponse } from '@/lib/errors'
 
 const CACHE_TTL_MS = 6 * 60 * 60 * 1000 // 6 hours
 
@@ -62,9 +64,10 @@ export async function GET(
 
     return xmlResponse(xml)
   } catch (err) {
-    const msg = err instanceof Error ? err.message : 'Unknown error'
+    // Public endpoint — never echo internal error detail into the XML. Log it.
+    console.error('[GET /api/feed/generate/[feedId]] feed generation failed:', err)
     return xmlResponse(
-      `<?xml version="1.0" encoding="UTF-8"?><error>${msg}</error>`,
+      '<?xml version="1.0" encoding="UTF-8"?><error>Feed generation failed</error>',
       500
     )
   }
@@ -86,6 +89,15 @@ export async function POST(
 
   const owned = await getOwnedFeed(user.id, feedId)
   if (!owned) return Response.json({ error: 'Feed not found' }, { status: 404 })
+
+  // Cost guard: cap forced regenerations per user (feed generation can invoke
+  // the AI mapping step). The public GET stays cache-served and is unaffected.
+  try {
+    await enforceRateLimit(user.id, 'feed_regenerate')
+  } catch (err) {
+    if (err instanceof RateLimitError) return Response.json({ error: err.message }, { status: 429 })
+    throw err
+  }
 
   try {
     const [{ xml, productCount }, validation] = await Promise.all([
@@ -111,7 +123,7 @@ export async function POST(
     )
 
     if (upsertErr) {
-      return Response.json({ error: upsertErr.message }, { status: 500 })
+      return errorResponse(upsertErr, 'POST /api/feed/generate/[feedId] cache upsert')
     }
 
     return Response.json({
@@ -121,9 +133,6 @@ export async function POST(
       validation_errors: validation?.issues ?? null,
     })
   } catch (err) {
-    return Response.json(
-      { error: err instanceof Error ? err.message : 'Unknown error' },
-      { status: 500 }
-    )
+    return errorResponse(err, 'POST /api/feed/generate/[feedId]')
   }
 }

@@ -57,9 +57,10 @@ export async function GET(
 
     return xmlResponse(xml)
   } catch (err) {
-    const msg = err instanceof Error ? err.message : 'Unknown error'
+    // Public endpoint — never echo internal error detail into the XML. Log it.
+    console.error('[GET /api/feed/[userId]] feed generation failed:', err)
     return xmlResponse(
-      `<?xml version="1.0" encoding="UTF-8"?><error>${msg}</error>`,
+      '<?xml version="1.0" encoding="UTF-8"?><error>Feed generation failed</error>',
       500
     )
   }

@@ -1,5 +1,6 @@
 import { createSupabaseServerClient } from '@/lib/supabase-server'
 import { adminDb, getOwnedFeed } from '@/lib/feeds'
+import { errorResponse } from '@/lib/errors'
 
 const ALLOWED_PAGE_SIZES = [20, 25, 50, 100, 200] as const
 const DEFAULT_PAGE_SIZE = 25
@@ -129,9 +130,6 @@ export async function GET(req: Request) {
       productTypes: facets.productTypes,
     })
   } catch (err) {
-    return Response.json(
-      { error: err instanceof Error ? err.message : 'Unknown error' },
-      { status: 500 }
-    )
+    return errorResponse(err, 'GET /api/products/meta')
   }
 }

@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { createSupabaseServerClient } from '@/lib/supabase-server'
 import { adminDb, getOwnedFeed } from '@/lib/feeds'
+import { errorResponse } from '@/lib/errors'
 
 export async function DELETE(
   _req: Request,
@@ -20,7 +21,7 @@ export async function DELETE(
   const db = adminDb()
   // ON DELETE CASCADE on feed_id FKs handles all child rows.
   const { error } = await db.from('feeds').delete().eq('id', feedId).eq('user_id', user.id)
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (error) return errorResponse(error, 'DELETE /api/feeds/[feedId]')
 
   return NextResponse.json({ ok: true })
 }
@@ -56,6 +57,6 @@ export async function PATCH(
     .select('id, name, description, created_at, updated_at')
     .single()
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (error) return errorResponse(error, 'PATCH /api/feeds/[feedId]')
   return NextResponse.json({ feed: data })
 }

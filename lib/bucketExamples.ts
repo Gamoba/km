@@ -23,6 +23,7 @@ import Anthropic from '@anthropic-ai/sdk'
 import { adminDb } from '@/lib/feeds'
 import type { SupabaseProduct } from '@/lib/sync'
 import { resolveField } from '@/lib/feedFilters'
+import { dbError } from '@/lib/errors'
 import { getBucketMembership } from '@/lib/optimizationBuckets'
 import {
   createOptimizerClient,
@@ -143,7 +144,7 @@ export async function saveBucketTitleConfig(
       },
       { onConflict: 'bucket_id' }
     )
-  if (error) throw new Error(error.message)
+  if (error) dbError('bucketExamples', error)
 }
 
 // ── Examples CRUD ────────────────────────────────────────────────────────────
@@ -241,7 +242,7 @@ export async function setExampleStatus(
       .eq('id', exampleId)
       .eq('feed_id', feedId)
       .eq('bucket_id', bucketId)
-    if (error) throw new Error(error.message)
+    if (error) dbError('bucketExamples', error)
     return
   }
 
@@ -251,7 +252,7 @@ export async function setExampleStatus(
     .eq('id', exampleId)
     .eq('feed_id', feedId)
     .eq('bucket_id', bucketId)
-  if (error) throw new Error(error.message)
+  if (error) dbError('bucketExamples', error)
 }
 
 export async function updateExampleNote(
@@ -266,7 +267,7 @@ export async function updateExampleNote(
     .eq('id', exampleId)
     .eq('feed_id', feedId)
     .eq('bucket_id', bucketId)
-  if (error) throw new Error(error.message)
+  if (error) dbError('bucketExamples', error)
 }
 
 // Deletes an example. On an approved row this frees a slot; on a candidate/reject
@@ -278,7 +279,7 @@ export async function deleteExample(feedId: string, bucketId: string, exampleId:
     .eq('id', exampleId)
     .eq('feed_id', feedId)
     .eq('bucket_id', bucketId)
-  if (error) throw new Error(error.message)
+  if (error) dbError('bucketExamples', error)
 }
 
 // ── Candidate generation ─────────────────────────────────────────────────────
@@ -496,7 +497,7 @@ export async function generateBucketCandidates(
       .select('*, metafields:product_metafields(*)')
       .eq('feed_id', feedId)
       .in('shopify_id', slice)
-    if (error) throw new Error(`Products failed: ${error.message}`)
+    if (error) dbError('bucketExamples products', error)
     // Preserve membership order within the slice (the .in() result order isn't
     // guaranteed) so "first eligible" is stable.
     const bySlice = new Map(((data ?? []) as SupabaseProduct[]).map((p) => [p.shopify_id, p]))
@@ -584,7 +585,7 @@ export async function generateBucketCandidates(
     .from('bucket_examples')
     .insert(rows)
     .select('id, bucket_id, product_ref, generated_title, status, note, approach, rationale, position, created_at')
-  if (error) throw new Error(error.message)
+  if (error) dbError('bucketExamples', error)
 
   const candidates: GeneratedCandidate[] = ((inserted ?? []) as BucketExample[]).map((r, i) => ({
     ...r,
