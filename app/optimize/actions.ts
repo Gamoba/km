@@ -745,17 +745,17 @@ export async function generateBucketCandidates(
   }
 }
 
-// Current (source) title of a product — for the workshop's round header showing
-// the one product all five candidates are titled from.
-export async function getProductCurrentTitle(
+// The workshop's round-header context (original title + resolved input-field
+// values) for the one product all five candidates are titled from.
+export async function getRoundProductContext(
   feedId: string,
   bucketId: string,
   productRef: string
-): Promise<{ data: string } | { error: string }> {
+): Promise<{ data: workshop.RoundProductContext } | { error: string }> {
   const g = await requireOwnedBucket(feedId, bucketId)
   if ('error' in g) return g
   try {
-    return { data: await workshop.getProductCurrentTitle(feedId, productRef) }
+    return { data: await workshop.getRoundProductContext(feedId, bucketId, productRef) }
   } catch (e) {
     return { error: (e as Error).message }
   }

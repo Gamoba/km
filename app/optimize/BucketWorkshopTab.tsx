@@ -17,7 +17,7 @@ import {
   setBucketExampleStatus,
   deleteBucketExample,
   getFeedMetafields,
-  getProductCurrentTitle,
+  getRoundProductContext,
 } from './actions'
 import { FILTER_FIELDS, type MetafieldOption } from '@/app/components/FilterEditor'
 import type { BucketExample } from '@/lib/bucketExamples'
@@ -42,11 +42,12 @@ function TrashIcon() {
 // Human label for a field token. Metafields prefer the definition NAME (e.g.
 // "Årgang") over the raw, possibly-mangled key ("custom._rgang"), falling back to
 // the key; standard fields use their friendly label.
-function fieldLabel(token: string, metafields?: MetafieldOption[]): string {
+function fieldLabel(token: string, metafields?: MetafieldOption[], bare = false): string {
   if (token.startsWith('metafield:')) {
     const nsKey = token.slice('metafield:'.length)
     const opt = metafields?.find((m) => `${m.namespace}.${m.key}` === nsKey)
-    return opt?.name ? `${opt.name} (metafield)` : `${nsKey} (metafield)`
+    const name = opt?.name ?? nsKey
+    return bare ? name : `${name} (metafield)`
   }
   return STANDARD_FIELDS.find((f) => f.value === token)?.label ?? token
 }
@@ -80,9 +81,13 @@ export function BucketWorkshopTab({ feedId, bucketId }: { feedId: string; bucket
   const [dirty, setDirty] = useState(false)
   const [generating, setGenerating] = useState(false)
   const [unusedLeft, setUnusedLeft] = useState<number | null>(null)
-  // Current (source) title of the product this round's candidates are all built
-  // from — shown above them so "same product, five ways" is obvious.
-  const [roundProductTitle, setRoundProductTitle] = useState('')
+  // Original title + resolved input-field values of the product this round's
+  // candidates are all built from — shown above them as a fixed reference point
+  // ("same product, five ways") and as a grounding check for the curator.
+  const [roundContext, setRoundContext] = useState<{ title: string; fields: { token: string; value: string }[] }>({
+    title: '',
+    fields: [],
+  })
   const [error, setError] = useState<string | null>(null)
 
   // Initial load — config + metafields + examples. setState only in callbacks.
@@ -130,12 +135,12 @@ export function BucketWorkshopTab({ feedId, bucketId }: { feedId: string; bucket
   const roundProductRef = candidates[0]?.product_ref ?? null
   useEffect(() => {
     if (!roundProductRef) {
-      setRoundProductTitle('')
+      setRoundContext({ title: '', fields: [] })
       return
     }
     let cancelled = false
-    getProductCurrentTitle(feedId, bucketId, roundProductRef).then((r) => {
-      if (!cancelled && 'data' in r) setRoundProductTitle(r.data)
+    getRoundProductContext(feedId, bucketId, roundProductRef).then((r) => {
+      if (!cancelled && 'data' in r) setRoundContext(r.data)
     })
     return () => {
       cancelled = true
@@ -452,19 +457,36 @@ export function BucketWorkshopTab({ feedId, bucketId }: { feedId: string; bucket
             This round — pick the approaches you like (selecting approves)
           </div>
           <div className="p-3.5 space-y-2.5">
-            {/* Same product, five ways — the source title these candidates rewrite. */}
-            {roundProductTitle && (
+            {/* Same product, five ways — the original title is the fixed reference
+                point the 5 approaches are compared against; the resolved input-field
+                values below double as a grounding check (a title claiming something
+                not listed here is a red flag). */}
+            {roundContext.title && (
               <div
                 style={{
-                  fontSize: '11px',
-                  padding: '6px 10px',
+                  padding: '8px 10px',
                   borderRadius: '5px',
                   background: 'var(--color-background-secondary)',
                   border: '1px solid var(--color-border-tertiary)',
                 }}
               >
-                <span style={{ color: 'var(--color-text-tertiary)' }}>Same product, five ways · current title: </span>
-                <span style={{ color: 'var(--color-text-secondary)' }}>{roundProductTitle}</span>
+                <div style={{ fontSize: '9px', textTransform: 'uppercase', letterSpacing: '0.04em', color: 'var(--color-text-tertiary)' }}>
+                  Original title — the 5 approaches below are all rewrites of this
+                </div>
+                <div style={{ fontSize: '13px', fontWeight: 600, color: 'var(--color-text-primary)', marginTop: '2px' }}>
+                  {roundContext.title}
+                </div>
+                {roundContext.fields.length > 0 && (
+                  <div style={{ fontSize: '11px', color: 'var(--color-text-secondary)', marginTop: '5px' }}>
+                    {roundContext.fields.map((f, i) => (
+                      <span key={f.token}>
+                        {i > 0 && <span style={{ color: 'var(--color-text-tertiary)' }}> · </span>}
+                        <span style={{ color: 'var(--color-text-tertiary)' }}>{fieldLabel(f.token, metafields, true)}: </span>
+                        {f.value}
+                      </span>
+                    ))}
+                  </div>
+                )}
               </div>
             )}
             {candidates.map((e) => {

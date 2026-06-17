@@ -29,6 +29,8 @@ import {
   toOptimizerProduct,
   validateResult,
   localeToLanguage,
+  mandatoryInstructionBlock,
+  instructionComplianceReminder,
   DEFAULT_CHAR_LIMIT,
   type ValidationResult,
 } from '@/lib/titleOptimizer'
@@ -167,16 +169,43 @@ export async function listBucketExamples(bucketId: string): Promise<BucketExampl
   })
 }
 
-// Current (source) title of one product, by ref — for the workshop's round
-// header ("same product, five ways"). Returns '' if the product isn't found.
-export async function getProductCurrentTitle(feedId: string, productRef: string): Promise<string> {
-  const { data } = await db()
-    .from('products')
-    .select('title')
-    .eq('feed_id', feedId)
-    .eq('shopify_id', productRef)
-    .maybeSingle()
-  return (data?.title as string | undefined) ?? ''
+// The workshop's round-header context: the product's original (source) title plus
+// the RESOLVED values of the bucket's selected input fields, in priority order.
+// Values come from the SAME resolveField + market_url path as buildProductPayload
+// (so they match the actual generation input and the product-detail view — GIDs
+// are already labels after sync), keeping only non-empty fields. Labels are left
+// to the client (fieldLabel) so the names match the rest of the workshop UI.
+export type RoundProductContext = {
+  title: string
+  fields: { token: string; value: string }[]
+}
+
+export async function getRoundProductContext(
+  feedId: string,
+  bucketId: string,
+  productRef: string
+): Promise<RoundProductContext> {
+  const [config, { data: ss }, { data: prod }] = await Promise.all([
+    getBucketTitleConfig(bucketId),
+    db().from('shop_settings').select('market_url').eq('feed_id', feedId).maybeSingle(),
+    db()
+      .from('products')
+      .select('*, metafields:product_metafields(*)')
+      .eq('feed_id', feedId)
+      .eq('shopify_id', productRef)
+      .maybeSingle(),
+  ])
+  if (!prod) return { title: '', fields: [] }
+
+  const marketUrl = (ss?.market_url as string | null) ?? null
+  const p = prod as SupabaseProduct
+  // Only the user's chosen input fields, in their priority order, non-empty.
+  const fields: { token: string; value: string }[] = []
+  for (const token of config.input_fields) {
+    const v = resolveField(token, p, marketUrl)
+    if (v && v.trim()) fields.push({ token, value: v.trim() })
+  }
+  return { title: p.title ?? '', fields }
 }
 
 // Smallest free approved slot in [0, max). Pure so it's unit-testable.
@@ -306,7 +335,13 @@ Include these attributes in the title when they help, in this priority order. Ea
 ${inputFields.map((f, i) => `${i + 1}. ${f}`).join('\n')}`
     : ''
 
-  return `You are a product title optimizer for Google Shopping feeds. You generate CANDIDATE titles for a human curator who will pick the best ones as reference examples. Rewrite each product's title so it ranks well in Google Shopping search and matches how shoppers search — while staying 100% truthful to the source data.
+  // Same hard instruction block + compliance reminder as the real run
+  // (titleOptimizer.buildSystemPrompt) so the workshop and the run share DNA.
+  const mandatory = mandatoryInstructionBlock(instructions)
+  const mandatoryBlock = mandatory ? `\n\n${mandatory}` : ''
+  const reminder = instructionComplianceReminder(instructions)
+
+  return `You are a product title optimizer for Google Shopping feeds. You generate CANDIDATE titles for a human curator who will pick the best ones as reference examples. Rewrite each product's title so it ranks well in Google Shopping search and matches how shoppers search — while staying 100% truthful to the source data.${mandatoryBlock}
 
 # Title rules
 - Structure: Brand → Product type → Key attributes (color, material, size, volume, vintage, model) → Variant. Most searchable terms first.
@@ -321,14 +356,20 @@ ${inputFields.map((f, i) => `${i + 1}. ${f}`).join('\n')}`
 - If data is thin, produce a SHORTER but accurate title rather than padding with assumptions.
 ${wishList}
 
-# Curator's instructions for this bucket
-${instructions.trim() || '(none provided — apply the general rules above)'}
-
 # Titling strategies — vary the METHOD, not just the words
 You generate several candidates at once. Each candidate MUST use a DIFFERENT strategy from this list — never repeat a strategy within one response. Vary the approach to building the title, not just the wording:
 ${STRATEGIES.map((s) => `- ${s.id}: ${s.description}`).join('\n')}
 
-# Output — return ONLY a JSON array, no preamble. One object per candidate — ALL candidates are for the one product, so every object echoes that SAME product_ref:
+How strategies interact with the MANDATORY USER INSTRUCTION (read carefully):
+EVERY candidate must obey the instruction on EVERY title — it is NOT the dimension that varies between strategies. If the instruction fixes which element must LEAD the title (e.g. "the year/vintage always comes first"), then that element occupies the FIRST position in EVERY candidate, with NO exceptions. Strategies whose name implies leading with something else — region_first, category_first, varietal_first, brand_vintage, concise, search_intent — must NOT override that fixed lead. Instead: put the fixed element first, THEN apply the strategy to the REMAINDER. Concretely, when the instruction is "year first":
+- region_first → "<year> <region> <rest>" (region brought as early as possible AFTER the year)
+- category_first → "<year> <product type> <rest>"
+- varietal_first → "<year> <grape/variety> <rest>"
+- brand_vintage → "<year> <producer> <rest>"
+Each strategy still differs from the others by what it front-loads AFTER the fixed lead, so the five stay distinct.
+Grounding still wins over the instruction: if the fixed element is ABSENT for this product (e.g. no year in the data), do NOT invent it — just apply the strategy normally.
+
+# Output — return ONLY a JSON array, no preamble. One object per candidate — ALL candidates are for the one product, so every object echoes that SAME product_ref:${reminder}
 [{ "product_ref": "...", "approach": "<one strategy id from the list>", "rationale": "<one short sentence>", "title": "...", "source_values": ["..."] }]
 - "approach": the strategy id you applied — must be one from the list above, and DISTINCT across the array.
 - "rationale": one short sentence in ENGLISH (always English, regardless of the title's language — it is an internal note for the human curator and NEVER appears in the feed) describing how the ${targetLanguage} title is built. It must NEVER justify an attribute that is not in the product's data.

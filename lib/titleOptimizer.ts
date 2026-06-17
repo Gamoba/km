@@ -229,15 +229,41 @@ export function sourceHash(product: OptimizerProduct): string {
 
 // ── Prompt building ──────────────────────────────────────────────────────────
 
+// The curator's free-text instruction, rendered as a HARD, prominent rule block.
+// Placed near the TOP of the prompt (so it outranks the generic guidance) and
+// echoed near the output (recency) by instructionComplianceReminder — so the
+// model both reads it first and is reminded of it last. Grounding still wins:
+// the framing forbids inventing data to satisfy the instruction. Shared by the
+// workshop generation AND the real run so the two prompts keep the same DNA.
+export function mandatoryInstructionBlock(instructions: string): string {
+  const t = instructions.trim()
+  if (!t) return ''
+  return `# MANDATORY USER INSTRUCTION — follow exactly
+The user gave this instruction for these titles. Treat EVERY part of it as a HARD RULE you MUST obey on EVERY title — not a preference, not a suggestion. When it conflicts with the general guidance below (structure, strategies, formatting), the USER INSTRUCTION WINS. The ONE exception is grounding, which is absolute: never invent, guess, or translate-in data to satisfy the instruction — apply it only as far as the product's real data allows.
+"""
+${t}
+"""`
+}
+
+// A short compliance reminder for the output section (recency anchor). Empty
+// when there is no instruction, so non-bucket runs are unaffected.
+export function instructionComplianceReminder(instructions: string): string {
+  return instructions.trim()
+    ? `\nBefore you answer, re-check the title against the MANDATORY USER INSTRUCTION above and rewrite it to comply if any part does not — without inventing data.`
+    : ''
+}
+
 // The stable, cacheable system prompt. Method A core. The Method-B rule block
 // is NOT here — it varies per product_type and would fragment the cache, so it
 // goes in the user message. Target language is also in the user message for the
 // same reason (so feeds in different languages share one cache entry).
 export function buildSystemPrompt(config: OptimizerConfig): string {
   // Per-bucket curator instructions (optional — the feed-level run omits it).
-  const instructionsBlock = config.instructions?.trim()
-    ? `\n\n# Curator's instructions for this bucket\n${config.instructions.trim()}`
-    : ''
+  // Lifted to a prominent HARD block at the top + a compliance reminder at the
+  // output, instead of a soft mid-prompt note that the model only half-followed.
+  const mandatory = mandatoryInstructionBlock(config.instructions ?? '')
+  const mandatoryBlock = mandatory ? `\n\n${mandatory}` : ''
+  const reminder = instructionComplianceReminder(config.instructions ?? '')
 
   // Prioritised "include if present" wish list (optional). Tokens are normalised
   // to match the product-data keys the user message sends: `metafield:ns.key` →
@@ -254,7 +280,7 @@ ${fields.map((f, i) => `${i + 1}. ${f.startsWith('metafield:') ? f.slice('metafi
     ? `\n\n# Examples of good titles\n${config.fewShotExamples.trim()}`
     : ''
 
-  return `You are a product title optimizer for Google Shopping feeds. Rewrite a product's title so it ranks well in Google Shopping search and matches how real shoppers search — while staying 100% truthful to the source data.
+  return `You are a product title optimizer for Google Shopping feeds. Rewrite a product's title so it ranks well in Google Shopping search and matches how real shoppers search — while staying 100% truthful to the source data.${mandatoryBlock}
 
 # Title rules
 - Structure: Brand → Product type → Key attributes (color, material, size, volume, vintage, model) → Variant. Most searchable terms first.
@@ -268,9 +294,9 @@ ${fields.map((f, i) => `${i + 1}. ${f.startsWith('metafield:') ? f.slice('metafi
 - Use ONLY attributes explicitly present in the provided product data.
 - NEVER invent or guess an attribute (vintage, volume, material, region, ABV, etc.). If it is not in the data, leave it out.
 - NEVER add a bottle size, volume, or measurement (ml, cl, l, kg, g) unless that exact value is in the data — do not assume a default like 750ml.
-- If data is thin, produce a SHORTER but accurate title rather than padding with assumptions.${instructionsBlock}${wishListBlock}${examplesBlock}
+- If data is thin, produce a SHORTER but accurate title rather than padding with assumptions.${wishListBlock}${examplesBlock}
 
-# Output — return ONLY valid JSON, no preamble:
+# Output — return ONLY valid JSON, no preamble:${reminder}
 Also return "source_values": the specific factual values you took from the product data and placed in the title (brand, producer, grape, region, country, vintage, volume, model, etc.), written EXACTLY as they appear in the product data — in the source language, NOT translated. Do not list the generic product type or any word you translated or inferred.
 { "title": "...", "source_values": ["Marqués de Murrieta", "1995", "Rioja"] }`
 }
