@@ -14,7 +14,10 @@ import type { SupabaseProduct } from '@/lib/sync'
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
-export type FeedFilterRule = { field: string; operator: string; value: string }
+// caseSensitive controls text matching for this rule. Undefined = case-sensitive
+// (the original behaviour, so legacy saved rules are unchanged); new rules created
+// in the editor set it explicitly. Ignored for numeric (>, <) and is_(not_)empty.
+export type FeedFilterRule = { field: string; operator: string; value: string; caseSensitive?: boolean }
 
 export type FeedFilter = {
   filter_type: 'include' | 'exclude'
@@ -98,30 +101,37 @@ function evalFilterRule(
   product: SupabaseProduct,
   marketUrl: string | null
 ): boolean {
+  // Case folding for text comparisons. Undefined caseSensitive = case-sensitive
+  // (unchanged legacy behaviour). Emptiness and numeric checks use the raw value.
+  const sensitive = rule.caseSensitive ?? true
+  const fold = (s: string) => (sensitive ? s : s.toLowerCase())
+  const rv = fold(rule.value)
+
   if (rule.field === 'collections') {
-    const cols = (product.collections as string[] | null | undefined) ?? []
+    const cols = ((product.collections as string[] | null | undefined) ?? []).map(fold)
     switch (rule.operator) {
       case 'contains':
-      case 'equals': return cols.includes(rule.value)
+      case 'equals': return cols.includes(rv)
       case 'does_not_contain':
-      case 'not_equals': return !cols.includes(rule.value)
+      case 'not_equals': return !cols.includes(rv)
       case 'is_empty': return cols.length === 0
       case 'is_not_empty': return cols.length > 0
       default: return true
     }
   }
-  const v = resolveField(rule.field, product, marketUrl)
+  const raw = resolveField(rule.field, product, marketUrl)
+  const v = fold(raw)
   switch (rule.operator) {
-    case 'contains': return v.includes(rule.value)
-    case 'does_not_contain': return !v.includes(rule.value)
-    case 'equals': return v === rule.value
-    case 'not_equals': return v !== rule.value
-    case 'starts_with': return v.startsWith(rule.value)
-    case 'ends_with': return v.endsWith(rule.value)
-    case 'is_empty': return !v
-    case 'is_not_empty': return !!v
-    case 'greater_than': return parseFloat(v) > parseFloat(rule.value)
-    case 'less_than': return parseFloat(v) < parseFloat(rule.value)
+    case 'contains': return v.includes(rv)
+    case 'does_not_contain': return !v.includes(rv)
+    case 'equals': return v === rv
+    case 'not_equals': return v !== rv
+    case 'starts_with': return v.startsWith(rv)
+    case 'ends_with': return v.endsWith(rv)
+    case 'is_empty': return !raw
+    case 'is_not_empty': return !!raw
+    case 'greater_than': return parseFloat(raw) > parseFloat(rule.value)
+    case 'less_than': return parseFloat(raw) < parseFloat(rule.value)
     default: return true
   }
 }

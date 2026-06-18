@@ -83,7 +83,7 @@ export async function saveOptimizationSettings(
 
 // ── Optimization filters (the separate scope filter set) ─────────────────────
 
-export type OptFilterRule = { field: string; operator: string; value: string }
+export type OptFilterRule = { field: string; operator: string; value: string; caseSensitive?: boolean }
 export type OptFilterConfig = { operator: 'AND' | 'OR'; rules: OptFilterRule[] }
 
 export async function getOptimizationFilters(
@@ -313,12 +313,24 @@ const RESULT_ORDER: Record<ResultStatus, number> = {
 // optimizationBuckets (which imports this module).
 export async function listBucketResults(feedId: string, bucketId: string): Promise<ResultItem[]> {
   const db = adminDb()
-  const { data: members } = await db
-    .from('bucket_products')
-    .select('product_ref')
-    .eq('feed_id', feedId)
-    .eq('bucket_id', bucketId)
-  const refs = ((members ?? []) as { product_ref: string }[]).map((m) => m.product_ref)
+  // Paged: a bucket can hold >1000 products and an unpaged read caps at 1000,
+  // which would silently truncate the results list. product_ref is unique per
+  // (feed, bucket) → a stable page key. (Inlined rather than reusing
+  // optimizationBuckets.pageAll to keep this module free of that circular import.)
+  const refs: string[] = []
+  const PAGE = 1000
+  for (let from = 0; ; from += PAGE) {
+    const { data: members } = await db
+      .from('bucket_products')
+      .select('product_ref')
+      .eq('feed_id', feedId)
+      .eq('bucket_id', bucketId)
+      .order('product_ref', { ascending: true })
+      .range(from, from + PAGE - 1)
+    const rows = (members ?? []) as { product_ref: string }[]
+    refs.push(...rows.map((m) => m.product_ref))
+    if (rows.length < PAGE) break
+  }
   if (refs.length === 0) return []
 
   const titleByRef = new Map<string, string>()

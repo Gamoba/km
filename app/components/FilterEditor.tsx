@@ -51,9 +51,14 @@ export const OPERATORS = [
 ]
 
 export const NO_VALUE_OPS = new Set(['is_empty', 'is_not_empty'])
+// Operators compared numerically — case mode is irrelevant for these.
+export const NUMERIC_OPS = new Set(['greater_than', 'less_than'])
 
 export function defaultRule(): FilterRule {
-  return { field: 'title', operator: 'contains', value: '' }
+  // New rules default to case-insensitive matching (the common need); the per-rule
+  // toggle can switch to "Match case". Legacy rules with no caseSensitive flag are
+  // treated as case-sensitive by the matcher, preserving their behaviour.
+  return { field: 'title', operator: 'contains', value: '', caseSensitive: false }
 }
 
 export function defaultConfig(): FilterConfig {
@@ -95,6 +100,9 @@ function RuleRow({
   const metafieldKey = isMetafield ? rule.field.slice('metafield:'.length) : ''
   const dropdownValue = isMetafield ? '__metafield__' : rule.field
   const needsValue = !NO_VALUE_OPS.has(rule.operator)
+  // Case toggle is meaningful only for text comparisons (not is_(not_)empty, not
+  // numeric >/<). Undefined caseSensitive ⇒ case-sensitive (legacy default).
+  const showCaseToggle = needsValue && !NUMERIC_OPS.has(rule.operator)
 
   function handleFieldSelect(val: string) {
     if (val === '__metafield__') onChange({ field: 'metafield:' })
@@ -164,6 +172,18 @@ function RuleRow({
         />
       ) : (
         <div className="flex-1" />
+      )}
+
+      {showCaseToggle && (
+        <select
+          value={(rule.caseSensitive ?? true) ? 'cs' : 'ci'}
+          onChange={(e) => onChange({ caseSensitive: e.target.value === 'cs' })}
+          className={`${selectCls} w-32 shrink-0`}
+          title="Whether text matching is case-sensitive"
+        >
+          <option value="ci">Ignore case</option>
+          <option value="cs">Match case</option>
+        </select>
       )}
 
       <button

@@ -49,8 +49,10 @@ export function BucketCustomLabelPanel({ feedId, bucketId }: { feedId: string; b
 
   const conflict = index !== null && conflicts.includes(index)
 
-  if (loading) return null
-
+  // Render immediately on entry (like Include/Exclude/Manual) — don't gate the whole
+  // panel on its own data load. The fields show right away and populate with the
+  // saved value when it arrives; inputs/Save stay disabled until then so a click
+  // can't clear a not-yet-loaded saved label.
   return (
     <div className="ff-panel">
       <div className="ff-panel-header" style={{ textTransform: 'none', letterSpacing: 0, fontSize: '12px', padding: '10px 14px' }}>
@@ -73,6 +75,7 @@ export function BucketCustomLabelPanel({ feedId, bucketId }: { feedId: string; b
                 setIndex(e.target.value === '' ? null : Number(e.target.value))
                 setSaved(false)
               }}
+              disabled={loading}
               className="ff-select w-44"
             >
               <option value="">None</option>
@@ -92,12 +95,12 @@ export function BucketCustomLabelPanel({ feedId, bucketId }: { feedId: string; b
                 setValue(e.target.value)
                 setSaved(false)
               }}
-              disabled={index === null}
+              disabled={loading || index === null}
               placeholder="e.g. title-test-A"
               className="ff-input w-full"
             />
           </div>
-          <button onClick={handleSave} disabled={saving} className="ff-btn-primary">
+          <button onClick={handleSave} disabled={saving || loading} className="ff-btn-primary">
             {saving ? 'Saving…' : saved ? 'Saved ✓' : 'Save'}
           </button>
         </div>

@@ -1,19 +1,32 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { planBucketRun, runBucketRefs } from './actions'
 import type { OverlapSummary } from '@/lib/titleOptimizationScope'
 
 const CHUNK = 10
 
+// What the parent's bottom bar needs to render the "Run optimization" button.
+export type RunControl = { run: () => void; disabled: boolean; running: boolean }
+
 export function BucketRunTab({
   feedId,
   bucketId,
   onRunComplete,
+  onRunControlChange,
+  isActive = true,
 }: {
   feedId: string
   bucketId: string
   onRunComplete?: () => void
+  // Reports the run trigger + state up so the editor's frozen bottom bar can host
+  // the "Run optimization" button as this step's final action.
+  onRunControlChange?: (control: RunControl) => void
+  // True while the Run step is the active tab. Tabs stay mounted (display toggling),
+  // so we re-read the membership summary each time this becomes active rather than
+  // only once on mount — otherwise the count/Run-button gate is a stale page-load
+  // snapshot (e.g. 0 before Scope committed members).
+  isActive?: boolean
 }) {
   const [error, setError] = useState<string | null>(null)
 
@@ -25,8 +38,12 @@ export function BucketRunTab({
   const [running, setRunning] = useState(false)
   const [progress, setProgress] = useState({ done: 0, total: 0 })
 
-  // Membership summary on mount — setState only in the async callback.
+  // Membership summary — (re)loaded each time the Run step becomes active, so the
+  // count + Run-button gate always reflect the current bucket_products membership,
+  // not a stale page-load read. setState only in the async callback (no loading
+  // flicker on re-entry — the summary updates in place).
   useEffect(() => {
+    if (!isActive) return
     let cancelled = false
     planBucketRun(feedId, bucketId, { rerun: false, includeHumanEdited: false }).then((r) => {
       if (cancelled) return
@@ -37,7 +54,7 @@ export function BucketRunTab({
     return () => {
       cancelled = true
     }
-  }, [feedId, bucketId])
+  }, [isActive, feedId, bucketId])
 
   async function refreshSummary() {
     const r = await planBucketRun(feedId, bucketId, { rerun: false, includeHumanEdited: false })
@@ -78,6 +95,24 @@ export function BucketRunTab({
 
   const noMembers = !loadingSummary && summary !== null && summary.inScope === 0
 
+  // Keep a live ref to handleRun so the reported trigger always runs the latest
+  // closure (current rerun/includeHumanEdited options). Updated in an effect (after
+  // render), not during render.
+  const handleRunRef = useRef(handleRun)
+  useEffect(() => {
+    handleRunRef.current = handleRun
+  })
+
+  // Report the run control to the parent whenever the button's state changes, so
+  // the bottom bar's "Run optimization" button stays in sync (label + disabled).
+  useEffect(() => {
+    onRunControlChange?.({
+      run: () => handleRunRef.current(),
+      disabled: running || loadingSummary || noMembers,
+      running,
+    })
+  }, [running, loadingSummary, noMembers, onRunControlChange])
+
   return (
     <div className="space-y-5">
       {error && (
@@ -96,24 +131,16 @@ export function BucketRunTab({
         </p>
       )}
 
-      {/* Hero — the run is the single clear action */}
-      <div className="flex items-start justify-between gap-4 flex-wrap">
-        <div className="space-y-1.5">
-          <h2 style={{ fontSize: '26px', fontWeight: 500, letterSpacing: '-0.02em', lineHeight: 1.1, color: 'var(--ink)' }}>
-            Run optimization
-          </h2>
-          <p style={{ fontSize: '13px', color: 'var(--ink-muted)' }}>
-            Generate and save AI titles for this bucket&apos;s products.
-          </p>
-        </div>
-        <button
-          onClick={handleRun}
-          disabled={running || loadingSummary || noMembers}
-          className="wl-btn-primary"
-          style={{ fontSize: '14px', padding: '9px 18px' }}
-        >
-          {running ? 'Running…' : 'Run optimization'}
-        </button>
+      {/* Hero — the heading; the run button itself now lives in the editor's frozen
+          bottom bar (this step's final action). */}
+      <div className="space-y-1.5">
+        <div className="wl-eyebrow" style={{ color: 'var(--accent-purple)' }}>Run</div>
+        <h2 style={{ fontSize: '26px', fontWeight: 500, letterSpacing: '-0.02em', lineHeight: 1.1, color: 'var(--ink)' }}>
+          Run optimization
+        </h2>
+        <p style={{ fontSize: '13px', color: 'var(--ink-muted)' }}>
+          Generate and save AI titles for this bucket&apos;s products — use the button in the bar below.
+        </p>
       </div>
 
       {/* Numbers as context */}

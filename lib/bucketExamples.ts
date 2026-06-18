@@ -25,6 +25,7 @@ import type { SupabaseProduct } from '@/lib/sync'
 import { resolveField } from '@/lib/feedFilters'
 import { dbError } from '@/lib/errors'
 import { getBucketMembership } from '@/lib/optimizationBuckets'
+import { getMetafieldNameMap } from '@/lib/metafieldDefinitions'
 import {
   createOptimizerClient,
   toOptimizerProduct,
@@ -32,6 +33,8 @@ import {
   localeToLanguage,
   mandatoryInstructionBlock,
   instructionComplianceReminder,
+  fieldDisplayLabel,
+  dedupeLabels,
   DEFAULT_CHAR_LIMIT,
   type ValidationResult,
 } from '@/lib/titleOptimizer'
@@ -303,14 +306,21 @@ export function productHasEnoughData(p: SupabaseProduct, fields: string[], marke
 }
 
 // The value-only payload sent to the model for one product: its ref, the current
-// title (rewrite source), and the resolved values of the chosen input fields.
-// Only present fields are included ("include if possible"), iterated in priority
-// order so the payload's key order also reflects the wish list's ranking.
-function buildProductPayload(p: SupabaseProduct, fields: string[], marketUrl: string | null) {
+// title (rewrite source), and the resolved values of the chosen input fields,
+// keyed by their HUMAN label (via `label`) so the keys match the wish-list and
+// the instruction's wording. Only present fields are included ("include if
+// possible"), iterated in priority order so the payload's key order also reflects
+// the wish list's ranking.
+function buildProductPayload(
+  p: SupabaseProduct,
+  fields: string[],
+  label: (token: string) => string,
+  marketUrl: string | null
+) {
   const resolved: Record<string, string> = {}
   for (const f of fields) {
     const v = resolveField(f, p, marketUrl)
-    if (v && v.trim()) resolved[f] = v
+    if (v && v.trim()) resolved[label(f)] = v
   }
   return { product_ref: p.shopify_id, current_title: p.title ?? '', fields: resolved }
 }
@@ -322,18 +332,18 @@ export function buildWorkshopSystemPrompt(
   instructions: string,
   charLimit: number,
   targetLanguage: string,
-  inputFields: string[] = []
+  inputFieldLabels: string[] = []
 ): string {
-  // The selected fields are a prioritised WISH LIST ("include if present"), keyed
-  // by the same tokens used as keys in each product's `fields` payload, so the
-  // model can correlate them. Order = priority. Omitted entirely when no fields
-  // are selected.
-  const wishList = inputFields.length
+  // The selected fields are a prioritised INCLUSION wish list — keyed by the same
+  // HUMAN labels used as keys in each product's `fields` payload, so the model can
+  // correlate them (and bind the user instruction's wording to the data). Order =
+  // inclusion priority, NOT placement. Omitted entirely when no fields are selected.
+  const wishList = inputFieldLabels.length
     ? `
 
-# Desired information — most important first
-Include these attributes in the title when they help, in this priority order. Each token below matches a key in the product's "fields" data. Include each ONLY if it is present for that product; if it is missing, simply skip it — NEVER invent it. When space is tight (the character limit), keep the higher-priority ones and drop the lower-priority ones:
-${inputFields.map((f, i) => `${i + 1}. ${f}`).join('\n')}`
+# Attributes to include — ranked by INCLUSION priority, NOT placement
+These are the attributes worth including, ranked by how important they are to KEEP. This ranking ONLY decides what makes the cut when space is tight (keep the higher-ranked, drop the lower-ranked to stay under the character limit) — it does NOT decide where anything goes in the title. Placement and order are governed by the MANDATORY USER INSTRUCTION above. Each name below matches a key in the product's "fields" data. Include each ONLY if it is present for that product; if it is missing, simply skip it — NEVER invent it:
+${dedupeLabels(inputFieldLabels).map((f, i) => `${i + 1}. ${f}`).join('\n')}`
     : ''
 
   // Same hard instruction block + compliance reminder as the real run
@@ -361,14 +371,14 @@ ${wishList}
 You generate several candidates at once. Each candidate MUST use a DIFFERENT strategy from this list — never repeat a strategy within one response. Vary the approach to building the title, not just the wording:
 ${STRATEGIES.map((s) => `- ${s.id}: ${s.description}`).join('\n')}
 
-How strategies interact with the MANDATORY USER INSTRUCTION (read carefully):
-EVERY candidate must obey the instruction on EVERY title — it is NOT the dimension that varies between strategies. If the instruction fixes which element must LEAD the title (e.g. "the year/vintage always comes first"), then that element occupies the FIRST position in EVERY candidate, with NO exceptions. Strategies whose name implies leading with something else — region_first, category_first, varietal_first, brand_vintage, concise, search_intent — must NOT override that fixed lead. Instead: put the fixed element first, THEN apply the strategy to the REMAINDER. Concretely, when the instruction is "year first":
-- region_first → "<year> <region> <rest>" (region brought as early as possible AFTER the year)
-- category_first → "<year> <product type> <rest>"
-- varietal_first → "<year> <grape/variety> <rest>"
-- brand_vintage → "<year> <producer> <rest>"
-Each strategy still differs from the others by what it front-loads AFTER the fixed lead, so the five stay distinct.
-Grounding still wins over the instruction: if the fixed element is ABSENT for this product (e.g. no year in the data), do NOT invent it — just apply the strategy normally.
+How the strategies interact with the MANDATORY USER INSTRUCTION (read carefully):
+EVERY candidate must obey the instruction on EVERY title — it is NOT the dimension that varies between strategies. The instruction fixes the ARRANGEMENT (an element first, an element last, or a fixed order — whatever it says); each strategy then only decides how to select and arrange the REMAINING, unpinned elements. A strategy whose name implies an arrangement that conflicts with the instruction — e.g. varietal_first when the instruction puts the grape LAST, or spec_heavy / region_first / brand_vintage front-loading an element the instruction pins elsewhere — must YIELD to the instruction: keep the instruction's placement and express the strategy only through the unpinned remainder. The candidates stay distinct by how they treat that remainder, NEVER by breaking the instruction.
+The principle is the SAME whatever the instruction says — examples:
+- instruction "grape last" + region_first → "<region> <rest> … <grape>" (the grape ENDS the title; the region leads the rest)
+- instruction "grape last" + brand_vintage → "<producer> <year> <rest> … <grape>"
+- instruction "vintage first" + region_first → "<year> <region> <rest>"
+- instruction "year, then grape, then region" → every title "<year> <grape> <region> <rest>"; the strategy varies only <rest>
+Grounding still wins over the instruction: if a pinned element is ABSENT for this product (e.g. no grape in the data), do NOT invent it — apply the instruction as far as the data allows, then arrange the rest per the strategy.
 
 # Output — return ONLY a JSON array, no preamble. One object per candidate — ALL candidates are for the one product, so every object echoes that SAME product_ref:${reminder}
 [{ "product_ref": "...", "approach": "<one strategy id from the list>", "rationale": "<one short sentence>", "title": "...", "source_values": ["..."] }]
@@ -470,17 +480,19 @@ export async function generateBucketCandidates(
     .eq('bucket_id', bucketId)
     .eq('status', 'candidate')
 
-  const [config, examples, memberRefs, { data: ss }, { data: settings }] = await Promise.all([
+  const [config, examples, memberRefs, { data: ss }, { data: settings }, nameMap] = await Promise.all([
     getBucketTitleConfig(bucketId),
     listBucketExamples(bucketId),
     getBucketMembership(feedId, bucketId),
     db().from('shop_settings').select('market_url, selected_locale').eq('feed_id', feedId).maybeSingle(),
     db().from('title_optimization_settings').select('char_limit').eq('feed_id', feedId).maybeSingle(),
+    getMetafieldNameMap(feedId), // token → human name, so the prompt/payload bind to the instruction
   ])
 
   const marketUrl = (ss?.market_url as string | null) ?? null
   const targetLanguage = localeToLanguage((ss?.selected_locale as string | null) ?? null)
   const charLimit = (settings?.char_limit as number | undefined) ?? DEFAULT_CHAR_LIMIT
+  const label = (token: string) => fieldDisplayLabel(token, nameMap)
 
   // Members that don't already have an example row.
   const usedRefs = new Set(examples.map((e) => e.product_ref))
@@ -516,8 +528,13 @@ export async function generateBucketCandidates(
     )
   }
 
-  const payload = buildProductPayload(product, config.input_fields, marketUrl)
-  const systemPrompt = buildWorkshopSystemPrompt(config.instructions, charLimit, targetLanguage, config.input_fields)
+  const payload = buildProductPayload(product, config.input_fields, label, marketUrl)
+  const systemPrompt = buildWorkshopSystemPrompt(
+    config.instructions,
+    charLimit,
+    targetLanguage,
+    config.input_fields.map(label)
+  )
   // Assign one distinct strategy per candidate, preferring approaches not already
   // approved (fresh-first), so the round is structurally distinct and divergent.
   const coveredApproaches = examples.filter((e) => e.status === 'approved').map((e) => e.approach)

@@ -100,6 +100,31 @@ export async function getBucket(feedId: string, bucketId: string): Promise<Bucke
   return (data as Bucket | null) ?? null
 }
 
+// PostgREST returns at most 1000 rows per request. Page through a query so reads
+// see EVERY row — without this a bucket with >1000 members reports a count capped
+// at 1000 and setBucketMembership's cleanup delete only sees the first 1000 rows,
+// leaving orphans behind. That is exactly how Scope (the true filter count) and
+// Examples/Run (the capped membership read) drifted apart. Mirrors
+// fetchAllActiveProducts. The query factory MUST apply a stable `.order()` so page
+// boundaries don't skip or duplicate rows.
+async function pageAll<T>(
+  query: (
+    from: number,
+    to: number
+  ) => PromiseLike<{ data: T[] | null; error: { message: string; code?: string; hint?: string | null } | null }>
+): Promise<T[]> {
+  const PAGE = 1000
+  const out: T[] = []
+  for (let from = 0; ; from += PAGE) {
+    const { data, error } = await query(from, from + PAGE - 1)
+    if (error) dbError('optimizationBuckets page', error)
+    const rows = (data ?? []) as T[]
+    out.push(...rows)
+    if (rows.length < PAGE) break
+  }
+  return out
+}
+
 // Fetches products (with metafields) for a set of refs, chunking the .in() list.
 async function fetchProductsByRefs(feedId: string, refs: string[]): Promise<SupabaseProduct[]> {
   const out: SupabaseProduct[] = []
@@ -126,7 +151,7 @@ async function buildBucketContext(
   // instructions, its prioritised input fields, and its APPROVED examples as the
   // few-shot. These replace the retired feed-level few-shot text (queried directly
   // to avoid a circular import with lib/bucketExamples, which imports this module).
-  const [settings, { data: shopSettings }, { data: titleConfig }, { data: approved }] = await Promise.all([
+  const [settings, { data: shopSettings }, { data: titleConfig }, { data: approved }, nameMap] = await Promise.all([
     getOptimizationSettings(feedId),
     db().from('shop_settings').select('selected_locale').eq('feed_id', feedId).maybeSingle(),
     db().from('bucket_title_config').select('instructions, input_fields').eq('bucket_id', bucketId).maybeSingle(),
@@ -135,6 +160,7 @@ async function buildBucketContext(
       .select('generated_title, position')
       .eq('bucket_id', bucketId)
       .eq('status', 'approved'),
+    getMetafieldNameMap(feedId), // token → human name, so the run payload/wish-list match the workshop
   ])
 
   // Approved titles, ordered by their curated slot, become the few-shot block.
@@ -149,6 +175,7 @@ async function buildBucketContext(
     fewShotExamples,
     instructions: (titleConfig?.instructions as string | undefined) ?? '',
     inputFields: (titleConfig?.input_fields as string[] | undefined) ?? [],
+    metafieldNames: nameMap,
     model: settings.model ?? undefined,
     temperature: settings.temperature ?? undefined,
   }
@@ -168,14 +195,28 @@ function buildOp(product: SupabaseProduct, originalTitle?: string): OptimizerPro
 // ── Bucket CRUD ──────────────────────────────────────────────────────────────
 
 export async function listBuckets(feedId: string): Promise<BucketSummary[]> {
-  const [{ data: buckets }, { data: members }, { data: opts }] = await Promise.all([
+  // members + opts are feed-wide and can exceed 1000 rows across all buckets, so
+  // they're paged too — otherwise the per-bucket counts shown in the list would be
+  // capped. product_ref is unique per feed in both tables → a stable page key.
+  const [{ data: buckets }, members, opts] = await Promise.all([
     db().from('optimization_buckets').select('*').eq('feed_id', feedId).order('created_at', { ascending: true }),
-    db().from('bucket_products').select('bucket_id').eq('feed_id', feedId),
-    db()
-      .from('product_title_optimizations')
-      .select('bucket_id, status')
-      .eq('feed_id', feedId)
-      .not('bucket_id', 'is', null),
+    pageAll<{ bucket_id: string }>((from, to) =>
+      db()
+        .from('bucket_products')
+        .select('bucket_id')
+        .eq('feed_id', feedId)
+        .order('product_ref', { ascending: true })
+        .range(from, to)
+    ),
+    pageAll<{ bucket_id: string; status: ExistingStatus }>((from, to) =>
+      db()
+        .from('product_title_optimizations')
+        .select('bucket_id, status')
+        .eq('feed_id', feedId)
+        .not('bucket_id', 'is', null)
+        .order('product_ref', { ascending: true })
+        .range(from, to)
+    ),
   ])
 
   const memberCount = new Map<string, number>()
@@ -429,12 +470,19 @@ export async function getFeedCustomLabelConflicts(feedId: string): Promise<numbe
 }
 
 export async function getBucketMembership(feedId: string, bucketId: string): Promise<string[]> {
-  const { data } = await db()
-    .from('bucket_products')
-    .select('product_ref')
-    .eq('feed_id', feedId)
-    .eq('bucket_id', bucketId)
-  return ((data ?? []) as { product_ref: string }[]).map((r) => r.product_ref)
+  // Paged: a bucket can hold >1000 products, and an unpaged read silently caps at
+  // 1000 — the bug that made Examples/Run see 1000 while Scope showed the real
+  // count. product_ref is unique per (feed, bucket), so it's a stable page key.
+  const rows = await pageAll<{ product_ref: string }>((from, to) =>
+    db()
+      .from('bucket_products')
+      .select('product_ref')
+      .eq('feed_id', feedId)
+      .eq('bucket_id', bucketId)
+      .order('product_ref', { ascending: true })
+      .range(from, to)
+  )
+  return rows.map((r) => r.product_ref)
 }
 
 // For a set of candidate refs, classifies them against existing membership:
@@ -508,13 +556,19 @@ export async function setBucketMembership(
 ): Promise<void> {
   const unique = [...new Set(refs)]
 
-  // This bucket's existing rows + their source.
-  const { data: existing } = await db()
-    .from('bucket_products')
-    .select('product_ref, source')
-    .eq('feed_id', feedId)
-    .eq('bucket_id', bucketId)
-  const rowsBySource = (existing ?? []) as { product_ref: string; source: string }[]
+  // This bucket's existing rows + their source. Paged: if a prior (broad) scope
+  // wrote >1000 rows, an unpaged read would only see the first 1000 and the
+  // cleanup delete below would leave the rest orphaned — keeping membership
+  // wrongly large after the filter is narrowed.
+  const rowsBySource = await pageAll<{ product_ref: string; source: string }>((from, to) =>
+    db()
+      .from('bucket_products')
+      .select('product_ref, source')
+      .eq('feed_id', feedId)
+      .eq('bucket_id', bucketId)
+      .order('product_ref', { ascending: true })
+      .range(from, to)
+  )
   const manualRefs = new Set(rowsBySource.filter((r) => r.source === 'manual').map((r) => r.product_ref))
   const currentFilterRefs = rowsBySource.filter((r) => r.source === 'filter').map((r) => r.product_ref)
 

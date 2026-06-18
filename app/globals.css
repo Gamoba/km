@@ -502,3 +502,19 @@ body {
   color: var(--ink);
 }
 
+
+/* Spin animation for in-flight states (e.g. Scope's match recompute, panel load).
+   The spinner elements style their own box inline and only borrow this keyframe,
+   so they stay visible (a static ring) even if this rule is ever missing. */
+@keyframes ff-spin {
+  to { transform: rotate(360deg); }
+}
+.ff-spin {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border: 2px solid var(--hairline);
+  border-top-color: var(--accent-purple);
+  border-radius: 50%;
+  animation: ff-spin 0.6s linear infinite;
+}

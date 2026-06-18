@@ -20,6 +20,7 @@ import {
   getRoundProductContext,
 } from './actions'
 import { FILTER_FIELDS, type MetafieldOption } from '@/app/components/FilterEditor'
+import { applyApprove, applyDelete, restoreDeleted, revertStatus } from './exampleOptimistic'
 import type { BucketExample } from '@/lib/bucketExamples'
 import type { ValidationResult } from '@/lib/titleOptimizer'
 
@@ -59,6 +60,19 @@ function GripIcon() {
       <circle cx="9" cy="12" r="1.4" /><circle cx="15" cy="12" r="1.4" />
       <circle cx="9" cy="18" r="1.4" /><circle cx="15" cy="18" r="1.4" />
     </svg>
+  )
+}
+
+// Small numbered badge for the three step headings — a discreet brand-purple
+// accent that makes the 1 → 2 → 3 flow readable at a glance.
+function StepNumber({ n }: { n: number }) {
+  return (
+    <span
+      className="flex items-center justify-center shrink-0"
+      style={{ width: '18px', height: '18px', borderRadius: '50%', background: 'var(--accent-purple)', color: '#ffffff', fontSize: '10px', fontWeight: 500 }}
+    >
+      {n}
+    </span>
   )
 }
 
@@ -234,17 +248,35 @@ export function BucketWorkshopTab({ feedId, bucketId }: { feedId: string; bucket
     setGenerating(false)
   }
 
+  // Optimistic approve: move the example to "approved" (and bump the approved
+  // count) in the UI immediately, then persist. On a failed save, roll THIS example
+  // back to its prior status/position by id — so concurrent optimistic changes to
+  // other examples are preserved — and surface a clear, reverted-state error.
   async function approveExample(id: string) {
+    const prev = examples.find((e) => e.id === id)
+    if (!prev || prev.status === 'approved') return
     setError(null)
+    setExamples((cur) => applyApprove(cur, id))
     const r = await setBucketExampleStatus(feedId, bucketId, id, 'approved')
-    if (r.error) setError(r.error)
-    await refreshExamples()
+    if (r.error) {
+      setExamples((cur) => revertStatus(cur, id, prev.status, prev.position))
+      setError(`Couldn't approve — change reverted. ${r.error}`)
+    }
   }
+
+  // Optimistic delete: remove from the UI immediately, then persist. On failure,
+  // restore the removed example near its original spot and show the error.
   async function removeExample(id: string) {
+    const prev = examples.find((e) => e.id === id)
+    if (!prev) return
+    const prevIndex = examples.findIndex((e) => e.id === id)
     setError(null)
+    setExamples((cur) => applyDelete(cur, id))
     const r = await deleteBucketExample(feedId, bucketId, id)
-    if (r.error) setError(r.error)
-    await refreshExamples()
+    if (r.error) {
+      setExamples((cur) => restoreDeleted(cur, prev, prevIndex))
+      setError(`Couldn't delete — restored. ${r.error}`)
+    }
   }
 
   const approvedFull = approved.length >= MAX_APPROVED
@@ -255,12 +287,21 @@ export function BucketWorkshopTab({ feedId, bucketId }: { feedId: string; bucket
     <div className="space-y-3">
       {error && <div style={{ fontSize: '11px', color: 'var(--color-badge-danger-text)' }}>{error}</div>}
 
-      <p style={{ fontSize: '11px', color: 'var(--color-text-tertiary)' }}>
-        Each round proposes 5 deliberately different titling approaches, each with a short explanation.
-        Pick the ones you like — selecting a candidate approves it (no notes needed). Keep up to {MAX_APPROVED}.
-        New rounds stay broad and avoid approaches you&apos;ve already approved; the bucket run later uses your
-        approved examples + instructions + input fields.
-      </p>
+      {/* Step heading — names the task and lays out the three-step flow below. */}
+      <div>
+        <div style={{ fontSize: '11px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--accent-purple)' }}>
+          Examples
+        </div>
+        <h2 style={{ fontSize: '20px', fontWeight: 500, color: 'var(--color-text-primary)', letterSpacing: '-0.01em', lineHeight: 1.2, marginTop: '3px' }}>
+          Teach the AI how to write titles
+        </h2>
+        <p style={{ fontSize: '12px', color: 'var(--color-text-secondary)', lineHeight: 1.5, marginTop: '6px', maxWidth: '70ch' }}>
+          Work through three steps: <strong style={{ color: 'var(--color-text-primary)', fontWeight: 500 }}>1</strong> write your instructions,{' '}
+          <strong style={{ color: 'var(--color-text-primary)', fontWeight: 500 }}>2</strong> generate 5 different approaches, and{' '}
+          <strong style={{ color: 'var(--color-text-primary)', fontWeight: 500 }}>3</strong> approve the ones you like (keep up to {MAX_APPROVED}).
+          The bucket run later uses your approved examples + instructions + input fields.
+        </p>
+      </div>
 
       {/* 50/50: left = config (instructions + field picker), right = the workflow
           (generate, candidates, approved, history). Stacks on narrow screens. */}
@@ -273,7 +314,9 @@ export function BucketWorkshopTab({ feedId, bucketId }: { feedId: string; bucket
           shared .ff-panel clips with overflow:hidden otherwise). */}
       <div className="ff-panel" style={{ overflow: 'visible' }}>
         <div className="ff-panel-header" style={{ textTransform: 'none', letterSpacing: 0, fontSize: '12px', padding: '10px 14px' }}>
-          <span>Instructions &amp; input fields</span>
+          <span className="flex items-center gap-2" style={{ fontWeight: 500, color: 'var(--color-text-primary)' }}>
+            <StepNumber n={1} /> Write your instructions
+          </span>
           {dirty && (
             <span className="ff-badge ff-badge-warning shrink-0" style={{ textTransform: 'none', letterSpacing: 0 }}>
               Unsaved changes
@@ -297,7 +340,7 @@ export function BucketWorkshopTab({ feedId, bucketId }: { feedId: string; bucket
           </div>
 
           <div>
-            <label className="ff-label">Input fields — include if present, in priority order</label>
+            <label className="ff-label">Choose inputs for the title generation</label>
 
             {/* Checkbox dropdown: pick/unpick many fields at once. */}
             <div ref={pickerRef} style={{ position: 'relative', maxWidth: '320px' }}>
@@ -307,7 +350,7 @@ export function BucketWorkshopTab({ feedId, bucketId }: { feedId: string; bucket
               {pickerOpen && (
                 <div
                   className="ff-panel"
-                  style={{ position: 'absolute', zIndex: 20, top: 'calc(100% + 4px)', left: 0, right: 0, maxHeight: '240px', overflowY: 'auto', padding: '6px' }}
+                  style={{ position: 'absolute', zIndex: 50, top: 'calc(100% + 4px)', left: 0, right: 0, maxHeight: '240px', overflowY: 'auto', padding: '6px' }}
                 >
                   {allFields.map((token) => (
                     <label
@@ -387,7 +430,40 @@ export function BucketWorkshopTab({ feedId, bucketId }: { feedId: string; bucket
         {/* Right 50% */}
         <div className="w-full lg:w-1/2 space-y-3">
 
-      {/* Approved examples (few-shot) */}
+      {/* Step 2 — Generate. On top because it's the action you come here to do; the
+          approved set below fills up afterward. */}
+      <div className="ff-panel">
+        <div className="ff-panel-header" style={{ textTransform: 'none', letterSpacing: 0, fontSize: '12px', padding: '10px 14px' }}>
+          <span className="flex items-center gap-2" style={{ fontWeight: 500, color: 'var(--color-text-primary)' }}>
+            <StepNumber n={2} /> Generate approaches
+          </span>
+        </div>
+        <div className="p-3.5 space-y-2">
+          <div className="flex items-center gap-2">
+            <button onClick={handleGenerate} disabled={generating} className="ff-btn-primary">
+              {generating
+                ? 'Generating…'
+                : examples.length === 0
+                  ? 'Generate title approaches'
+                  : 'Generate more approaches'}
+            </button>
+            <span style={{ fontSize: '10px', color: 'var(--color-text-tertiary)' }}>
+              {approved.length} approved{approved.length ? ' (those approaches are avoided next round)' : ''}
+              {unusedLeft !== null ? ` · ${unusedLeft} members left` : ''}
+            </span>
+          </div>
+          <p style={{ fontSize: '10px', color: 'var(--color-text-tertiary)' }}>
+            Generating starts a fresh round of 5; any candidates you didn&apos;t pick from the last round are set aside.
+          </p>
+          {approvedFull && (
+            <p style={{ fontSize: '10px', color: 'var(--color-text-tertiary)' }}>
+              You have {MAX_APPROVED} approved examples — delete one below to free a slot before approving more.
+            </p>
+          )}
+        </div>
+      </div>
+
+      {/* Approved examples (few-shot) — fills up as you approve from each round. */}
       <div className="ff-panel">
         <div className="ff-panel-header" style={{ textTransform: 'none', letterSpacing: 0, fontSize: '12px', padding: '10px 14px' }}>
           Approved examples — {approved.length}/{MAX_APPROVED}
@@ -395,7 +471,7 @@ export function BucketWorkshopTab({ feedId, bucketId }: { feedId: string; bucket
         <div className="p-3.5 space-y-1.5">
           {approved.length === 0 ? (
             <p style={{ fontSize: '11px', color: 'var(--color-text-tertiary)' }}>
-              None yet. Generate candidates below and approve the good ones.
+              None yet. Generate approaches above and approve the good ones.
             </p>
           ) : (
             approved.map((e) => (
@@ -424,37 +500,13 @@ export function BucketWorkshopTab({ feedId, bucketId }: { feedId: string; bucket
         </div>
       </div>
 
-      {/* Generate */}
-      <div className="ff-panel">
-        <div className="ff-panel-header" style={{ textTransform: 'none', letterSpacing: 0, fontSize: '12px', padding: '10px 14px' }}>
-          Generate approaches
-        </div>
-        <div className="p-3.5 space-y-2">
-          <div className="flex items-center gap-2">
-            <button onClick={handleGenerate} disabled={generating} className="ff-btn-primary">
-              {generating ? 'Generating…' : 'Generate 5 approaches'}
-            </button>
-            <span style={{ fontSize: '10px', color: 'var(--color-text-tertiary)' }}>
-              {approved.length} approved{approved.length ? ' (those approaches are avoided next round)' : ''}
-              {unusedLeft !== null ? ` · ${unusedLeft} members left` : ''}
-            </span>
-          </div>
-          <p style={{ fontSize: '10px', color: 'var(--color-text-tertiary)' }}>
-            Generating starts a fresh round of 5; any candidates you didn&apos;t pick from the last round are set aside.
-          </p>
-          {approvedFull && (
-            <p style={{ fontSize: '10px', color: 'var(--color-text-tertiary)' }}>
-              You have {MAX_APPROVED} approved examples — delete one above to free a slot before approving more.
-            </p>
-          )}
-        </div>
-      </div>
-
       {/* Candidates to curate — this round's 5 approaches. Selecting = approve. */}
       {candidates.length > 0 && (
         <div className="ff-panel">
           <div className="ff-panel-header" style={{ textTransform: 'none', letterSpacing: 0, fontSize: '12px', padding: '10px 14px' }}>
-            This round — pick the approaches you like (selecting approves)
+            <span className="flex items-center gap-2" style={{ fontWeight: 500, color: 'var(--color-text-primary)' }}>
+              <StepNumber n={3} /> Approve the ones you like
+            </span>
           </div>
           <div className="p-3.5 space-y-2.5">
             {/* Same product, five ways — the original title is the fixed reference

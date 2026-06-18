@@ -108,10 +108,15 @@ export function BucketResultsPanel({
   feedId,
   bucketId,
   reloadKey,
+  isActive = true,
 }: {
   feedId: string
   bucketId: string
   reloadKey: number
+  // True while the Run step (which hosts Results) is active. Tabs stay mounted, so
+  // we re-read results each time this becomes active rather than only on mount —
+  // otherwise Results shows a stale page-load snapshot on entry.
+  isActive?: boolean
 }) {
   const [items, setItems] = useState<ResultItem[]>([])
   const [drafts, setDrafts] = useState<Record<string, string>>({})
@@ -122,9 +127,12 @@ export function BucketResultsPanel({
   const [expanded, setExpanded] = useState<string | null>(null)
   const [details, setDetails] = useState<Record<string, ProductDetail | 'loading'>>({})
 
+  // (Re)load results each time this becomes active, plus on reloadKey bumps (after a
+  // run). Updates in place — no setLoading(true) on re-entry, so no flicker and no
+  // synchronous setState in the effect body.
   useEffect(() => {
+    if (!isActive) return
     let cancelled = false
-    setLoading(true)
     listBucketResults(feedId, bucketId).then((r) => {
       if (cancelled) return
       if ('data' in r) {
@@ -136,7 +144,7 @@ export function BucketResultsPanel({
     return () => {
       cancelled = true
     }
-  }, [feedId, bucketId, reloadKey])
+  }, [feedId, bucketId, reloadKey, isActive])
 
   // Apply a server result locally so the row reflects the new state without a full reload.
   function applyLocal(ref: string, patch: Partial<ResultItem>) {

@@ -89,7 +89,18 @@
       "PowerShell(npx tsc --noEmit 2>&1 | Select-Object -First 20; Write-Output \"---LINT---\"; npx eslint app/products/ProductsClient.tsx app/dashboard/ProductsTable.tsx 2>&1 | Select-Object -First 25)",
       "PowerShell(npx tsc --noEmit 2>&1 | Select-Object -First 12; if \\($?\\) { \"tsc clean\" })",
       "PowerShell(npx tsc --noEmit 2>&1 | Select-Object -First 10; if \\($?\\) { \"tsc clean\" }; curl.exe -s -o NUL -w \"dev=%{http_code}`n\" http://localhost:3000/login)",
-      "PowerShell(npx tsc --noEmit 2>&1 | Select-Object -First 8; if \\($?\\) { \"tsc clean\" }; curl.exe -s -o NUL -w \"dev=%{http_code}`n\" http://localhost:3000/login)"
+      "PowerShell(npx tsc --noEmit 2>&1 | Select-Object -First 8; if \\($?\\) { \"tsc clean\" }; curl.exe -s -o NUL -w \"dev=%{http_code}`n\" http://localhost:3000/login)",
+      "Bash(ls -la .env*)",
+      "Bash(ls .next)",
+      "Bash(curl -s -o /dev/null -w \"scope-editor: %{http_code}\\\\n\" \"http://localhost:3000/feed/test-feed/optimize/test-bucket\")",
+      "Bash(curl -s -o /dev/null -w \"bucket-editor: %{http_code}\\\\n\" \"http://localhost:3000/feed/test-feed/optimize/test-bucket\")",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" \"http://localhost:3000/feed/test-feed/optimize/test-bucket\")",
+      "Bash(tail -4 /tmp/ffdev.log)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" \"http://localhost:3000/feed/test/optimize/test\")",
+      "Bash(curl -s -o /dev/null \"http://localhost:3000/login\")",
+      "Bash(curl -s http://localhost:3000/login)",
+      "Bash(curl -s -o /dev/null -w \"optimize route: %{http_code}\\\\n\" \"http://localhost:3000/feed/test/optimize/test\")",
+      "Bash(curl -s -o /dev/null -w \"route: %{http_code}\\\\n\" \"http://localhost:3000/feed/test/optimize/test\")"
     ]
   }
 }

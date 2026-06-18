@@ -4,7 +4,7 @@ import { createSupabaseServerClient } from '@/lib/supabase-server'
 import { adminDb, getOwnedFeed } from '@/lib/feeds'
 import { getFeedMetafields as getFeedMetafieldsLib, type FeedMetafield } from '@/lib/optimizationBuckets'
 
-export type FilterRule = { field: string; operator: string; value: string }
+export type FilterRule = { field: string; operator: string; value: string; caseSensitive?: boolean }
 export type FilterConfig = { operator: 'AND' | 'OR'; rules: FilterRule[] }
 
 // The feed's metafields (namespace.key + product count + resolved definition

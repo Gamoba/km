@@ -60,6 +60,10 @@ export type OptimizerConfig = {
   // leaves them undefined, so its prompt is unchanged):
   instructions?: string // the bucket's free-text curator instructions
   inputFields?: string[] // prioritised "include if present" field tokens
+  // "namespace.key" → human definition name (e.g. "custom._rgang" → "Årgang"), so
+  // the wish-list and product payload label metafields legibly instead of by their
+  // mangled raw key — exactly as the workshop does. Omitted → raw keys (unchanged).
+  metafieldNames?: Map<string, string>
   model?: string // override for testing; defaults to MODEL
   temperature?: number // override; defaults to TEMPERATURE
 }
@@ -238,8 +242,11 @@ export function sourceHash(product: OptimizerProduct): string {
 export function mandatoryInstructionBlock(instructions: string): string {
   const t = instructions.trim()
   if (!t) return ''
-  return `# MANDATORY USER INSTRUCTION — follow exactly
-The user gave this instruction for these titles. Treat EVERY part of it as a HARD RULE you MUST obey on EVERY title — not a preference, not a suggestion. When it conflicts with the general guidance below (structure, strategies, formatting), the USER INSTRUCTION WINS. The ONE exception is grounding, which is absolute: never invent, guess, or translate-in data to satisfy the instruction — apply it only as far as the product's real data allows.
+  return `# MANDATORY USER INSTRUCTION — the global rule, always wins
+The user gave this instruction for these titles. Treat EVERY part of it as a HARD RULE you MUST obey on EVERY title — not a preference, not a suggestion. It is the GLOBAL rule and OVERRIDES everything below whenever they conflict: the title-structure rules (e.g. "front-load the most important keywords", "Brand → Product type → attributes"), every titling strategy, and the field-priority ranking. Those only arrange the parts the instruction leaves unspecified.
+- The instruction defines the ARRANGEMENT, whatever it is. If it pins an element to a POSITION — first, last, or a specific slot — put that element EXACTLY there in every title. If it fixes a relative ORDER of elements, follow that order in every title.
+- Field priority is a SEPARATE, lower concept: the ranked field list (if any) only decides which attributes to KEEP when space is tight — it NEVER decides placement. Placement and order are governed solely by this instruction.
+The ONE thing that outranks the instruction is grounding, which is absolute: never invent, guess, or translate-in data to satisfy it — apply it only as far as the product's real data allows. If a pinned element is absent for a product, skip it (do NOT invent it) and arrange the rest normally.
 """
 ${t}
 """`
@@ -251,6 +258,31 @@ export function instructionComplianceReminder(instructions: string): string {
   return instructions.trim()
     ? `\nBefore you answer, re-check the title against the MANDATORY USER INSTRUCTION above and rewrite it to comply if any part does not — without inventing data.`
     : ''
+}
+
+const EMPTY_NAME_MAP = new Map<string, string>()
+
+// Human label for a field token — shared by the workshop AND the run so the model
+// sees product data IDENTICALLY in both. A metafield resolves to its definition
+// NAME (custom._rgang → "Årgang") via the feed's name map; this is what binds the
+// user instruction's wording ("Drue last") to the data. Both the filter-token form
+// ("metafield:ns.key", used in the wish-list) and the bare "ns.key" (used as the
+// payload metafield key) resolve through the SAME map, so wish-list and payload
+// keys match. Standard fields (vendor, product_type, …) are already legible and
+// pass through unchanged; an unmapped metafield falls back to its bare "ns.key".
+export function fieldDisplayLabel(token: string, nameMap: Map<string, string>): string {
+  const isMeta = token.startsWith('metafield:')
+  const nsKey = isMeta ? token.slice('metafield:'.length) : token
+  const name = nameMap.get(nsKey)
+  if (name) return name
+  return isMeta ? nsKey : token
+}
+
+// De-duplicates labels, keeping the first (highest-priority) occurrence — two
+// source tokens can map to the same definition name (e.g. custom.land +
+// custom.land_obj → "Land"), and a field should appear only once.
+export function dedupeLabels(labels: string[]): string[] {
+  return [...new Set(labels)]
 }
 
 // The stable, cacheable system prompt. Method A core. The Method-B rule block
@@ -265,14 +297,15 @@ export function buildSystemPrompt(config: OptimizerConfig): string {
   const mandatoryBlock = mandatory ? `\n\n${mandatory}` : ''
   const reminder = instructionComplianceReminder(config.instructions ?? '')
 
-  // Prioritised "include if present" wish list (optional). Tokens are normalised
-  // to match the product-data keys the user message sends: `metafield:ns.key` →
-  // `ns.key`; standard tokens (vendor, product_type, …) already match.
+  // Prioritised "include if present" wish list (optional). Labels are the SAME
+  // human names the product payload uses as keys (metafields → definition name),
+  // so the model correlates the two and binds the instruction to the data.
   const fields = config.inputFields ?? []
-  const wishListBlock = fields.length
-    ? `\n\n# Desired information — most important first
-Include these attributes in the title when they help, in this priority order. Each token matches a key in the product data. Include each ONLY if it is present for that product; if it is missing, simply skip it — NEVER invent it. When space is tight (the character limit), keep the higher-priority ones and drop the lower-priority ones:
-${fields.map((f, i) => `${i + 1}. ${f.startsWith('metafield:') ? f.slice('metafield:'.length) : f}`).join('\n')}`
+  const fieldLabels = dedupeLabels(fields.map((f) => fieldDisplayLabel(f, config.metafieldNames ?? EMPTY_NAME_MAP)))
+  const wishListBlock = fieldLabels.length
+    ? `\n\n# Attributes to include — ranked by INCLUSION priority, NOT placement
+This list ranks which attributes are most important to KEEP when space is tight (keep the higher-ranked, drop the lower-ranked to stay under the character limit). It does NOT set placement — order and position are governed by the MANDATORY USER INSTRUCTION above (or, when there is no instruction, by the title rules). Each name matches a key in the product data. Include each ONLY if it is present for that product; if it is missing, simply skip it — NEVER invent it:
+${fieldLabels.map((f, i) => `${i + 1}. ${f}`).join('\n')}`
     : ''
 
   // Few-shot examples (optional — omit the whole section when there are none).
@@ -318,7 +351,8 @@ If a priority attribute is missing from the data, skip it (do NOT invent it) and
 export function buildUserMessage(
   product: OptimizerProduct,
   targetLanguage: string,
-  rule?: TitleRule
+  rule?: TitleRule,
+  metafieldNames?: Map<string, string>
 ): string {
   const data: Record<string, unknown> = { current_title: product.title }
   if (product.product_type) data.product_type = product.product_type
@@ -326,7 +360,11 @@ export function buildUserMessage(
   if (product.tags.length) data.tags = product.tags
   if (product.variant_options.length) data.variant_options = product.variant_options
   if (product.metafields.length) {
-    data.metafields = Object.fromEntries(product.metafields.map((m) => [m.key, m.value]))
+    // Key metafields by their human definition name (custom._rgang → "Årgang") so
+    // the model sees them EXACTLY as the workshop does and the instruction binds to
+    // the data. Falls back to the raw "ns.key" when no name is known.
+    const nm = metafieldNames ?? EMPTY_NAME_MAP
+    data.metafields = Object.fromEntries(product.metafields.map((m) => [nm.get(m.key) ?? m.key, m.value]))
   }
 
   const ruleBlock = rule ? `${buildRuleBlock(rule)}\n\n` : ''
@@ -372,7 +410,7 @@ export async function callOptimizer(
     max_tokens: MAX_TOKENS,
     temperature: config.temperature ?? TEMPERATURE,
     system: [{ type: 'text', text: systemPrompt, cache_control: { type: 'ephemeral' } }],
-    messages: [{ role: 'user', content: buildUserMessage(product, targetLanguage, rule) }],
+    messages: [{ role: 'user', content: buildUserMessage(product, targetLanguage, rule, config.metafieldNames) }],
   })
   const block = msg.content[0]
   if (!block || block.type !== 'text') return null
