@@ -57,9 +57,9 @@ export function BucketCustomLabelPanel({ feedId, bucketId }: { feedId: string; b
         Custom label — split-testing
       </div>
       <div className="p-3.5 space-y-2">
-        {error && <div style={{ fontSize: '11px', color: 'var(--color-badge-danger-text)' }}>{error}</div>}
+        {error && <div style={{ fontSize: '11px', color: 'var(--accent-red)' }}>{error}</div>}
 
-        <p style={{ fontSize: '11px', color: 'var(--color-text-tertiary)' }}>
+        <p style={{ fontSize: '11px', color: 'var(--ink-muted)' }}>
           Tag every product in this bucket with a Google Shopping custom label, so you can compare this
           bucket&apos;s real performance (clicks / sales) against another bucket in Google Ads.
         </p>

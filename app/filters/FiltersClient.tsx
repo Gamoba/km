@@ -128,27 +128,30 @@ export function FiltersClient({
   const totalCount = products?.length ?? null
 
   return (
-    <div className="min-h-screen">
-      <header className="ff-topbar">
-        <div className="flex items-center gap-3">
-          <h1 className="ff-topbar-title">{feedName} · Filters</h1>
-          <span style={{ fontSize: '11px', color: 'var(--color-text-tertiary)' }}>
-            {matchCount !== null && totalCount !== null
-              ? `${matchCount} of ${totalCount} products in feed`
-              : 'Loading…'}
-          </span>
-        </div>
-        <div className="flex items-center gap-2">
-          {saveError && (
-            <span style={{ fontSize: '11px', color: 'var(--color-badge-danger-text)' }}>{saveError}</span>
-          )}
-          <button onClick={handleSave} disabled={isPending} className="ff-btn-primary">
-            {isPending ? 'Saving…' : saveSuccess ? 'Saved' : 'Save'}
-          </button>
-        </div>
-      </header>
+    <div className="min-h-screen" style={{ background: 'var(--bg-base)' }}>
+      <main className="max-w-4xl mx-auto px-6 py-9 space-y-5">
+        <header className="flex items-start justify-between gap-4 flex-wrap">
+          <div className="space-y-1.5 min-w-0">
+            <div className="wl-eyebrow truncate">{feedName}</div>
+            <h1 style={{ fontSize: '30px', fontWeight: 500, letterSpacing: '-0.02em', lineHeight: 1.1, color: 'var(--ink)' }}>
+              Filters
+            </h1>
+            <p style={{ fontSize: '13px', color: 'var(--ink-muted)' }}>
+              {matchCount !== null && totalCount !== null
+                ? `${matchCount} of ${totalCount} products in feed`
+                : 'Loading…'}
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            {saveError && (
+              <span style={{ fontSize: '11px', color: 'var(--accent-red)' }}>{saveError}</span>
+            )}
+            <button onClick={handleSave} disabled={isPending} className="ff-btn-primary">
+              {isPending ? 'Saving…' : saveSuccess ? 'Saved' : 'Save'}
+            </button>
+          </div>
+        </header>
 
-      <main className="px-4 py-4 max-w-4xl space-y-3">
         <FilterSection
           title="Include products"
           description="Only products matching these rules are included. No rules = all products included."

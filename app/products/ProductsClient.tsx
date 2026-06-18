@@ -210,58 +210,50 @@ export function ProductsClient({
     productsLoading || searchInput !== searchQuery
   const totalLabel = meta ? `of ${meta.total} products` : 'products'
 
+  const statusLine =
+    phase === 'ready'
+      ? `${products.length} ${totalLabel}${syncResult ? ` · synced in ${(syncResult.durationMs / 1000).toFixed(1)}s` : ''}`
+      : phase === 'loading'
+        ? 'Loading…'
+        : phase === 'syncing'
+          ? 'Syncing…'
+          : ''
+
   return (
-    <div className="min-h-screen">
-      <header className="ff-topbar">
-        <div className="flex items-center gap-3">
-          <h1 className="ff-topbar-title">{feedName} · Products</h1>
-          {phase === 'ready' && (
-            <span style={{ fontSize: '11px', color: 'var(--color-text-tertiary)' }}>
-              {products.length} {totalLabel}
-              {syncResult && ` · synced in ${(syncResult.durationMs / 1000).toFixed(1)}s`}
-            </span>
-          )}
-          {phase === 'loading' && (
-            <span style={{ fontSize: '11px', color: 'var(--color-text-tertiary)' }}>Loading…</span>
-          )}
-          {phase === 'syncing' && (
-            <span style={{ fontSize: '11px', color: 'var(--color-text-tertiary)' }}>Syncing…</span>
-          )}
-        </div>
-        <div className="flex items-center gap-2">
+    <div className="min-h-screen" style={{ background: 'var(--bg-base)' }}>
+      <main className="max-w-6xl mx-auto px-6 py-9 space-y-6">
+        {/* Hero */}
+        <header className="flex items-end justify-between gap-4 flex-wrap">
+          <div className="space-y-1.5">
+            <div className="wl-eyebrow truncate">{feedName}</div>
+            <h1 style={{ fontSize: '30px', fontWeight: 500, letterSpacing: '-0.02em', lineHeight: 1.1, color: 'var(--ink)' }}>
+              Products
+            </h1>
+            {statusLine && <p style={{ fontSize: '13px', color: 'var(--ink-muted)' }}>{statusLine}</p>}
+          </div>
           {(phase === 'ready' || phase === 'empty') && (
-            <button onClick={runSync} className="ff-btn-primary">
+            <button onClick={runSync} className="wl-btn-primary shrink-0">
               Sync again
             </button>
           )}
-        </div>
-      </header>
+        </header>
 
-      <main className="px-4 py-4 max-w-6xl">
         {phase === 'error' && (
-          <div
-            className="ff-panel p-4"
-            style={{
-              borderColor: 'var(--color-badge-danger-text)',
-              background: 'var(--color-badge-danger-bg)',
-            }}
-          >
-            <p style={{ fontSize: '12px', fontWeight: 500, color: 'var(--color-badge-danger-text)' }}>
-              Error
-            </p>
-            <p
-              className="mt-1 mb-3"
-              style={{ fontSize: '11px', color: 'var(--color-badge-danger-text)' }}
-            >
-              {error}
-            </p>
+          <div className="wl-card" style={{ padding: '16px' }}>
+            <div className="flex items-start gap-2.5">
+              <span className="wl-dot shrink-0" style={{ background: 'var(--accent-red)', marginTop: '5px' }} />
+              <div>
+                <p style={{ fontSize: '13px', fontWeight: 500, color: 'var(--ink)' }}>Something went wrong</p>
+                <p className="mt-1" style={{ fontSize: '12px', color: 'var(--ink-secondary)' }}>{error}</p>
+              </div>
+            </div>
             <button
               onClick={() => {
                 setPhase('loading')
                 fetchProducts({ initial: true })
                 fetchMeta()
               }}
-              className="ff-btn-secondary"
+              className="wl-btn-secondary mt-3"
             >
               Try again
             </button>
@@ -269,26 +261,19 @@ export function ProductsClient({
         )}
 
         {phase === 'syncing' && (
-          <div className="ff-panel py-16 flex flex-col items-center gap-2.5">
+          <div className="wl-card py-16 flex flex-col items-center gap-3">
             <div
               className="w-6 h-6 rounded-full animate-spin"
-              style={{
-                border: '2px solid var(--color-accent)',
-                borderTopColor: 'transparent',
-              }}
+              style={{ border: '2px solid var(--accent-purple)', borderTopColor: 'transparent' }}
             />
-            <p style={{ fontSize: '11px', color: 'var(--color-text-tertiary)' }}>
-              Fetching from Shopify and saving…
-            </p>
+            <p style={{ fontSize: '13px', color: 'var(--ink-muted)' }}>Fetching from Shopify and saving…</p>
           </div>
         )}
 
         {phase === 'empty' && (
-          <div className="ff-panel py-16 flex flex-col items-center gap-3">
-            <p style={{ fontSize: '12px', color: 'var(--color-text-tertiary)' }}>
-              No products yet
-            </p>
-            <button onClick={runSync} className="ff-btn-primary">
+          <div className="wl-card py-16 flex flex-col items-center gap-3">
+            <p style={{ fontSize: '14px', color: 'var(--ink-secondary)' }}>No products yet</p>
+            <button onClick={runSync} className="wl-btn-primary">
               Sync products
             </button>
           </div>
@@ -396,7 +381,7 @@ function RowSkeletons({ count }: { count: number }) {
             <div
               className="w-9 h-9 shrink-0 animate-pulse"
               style={{
-                background: 'var(--color-background-secondary)',
+                background: 'var(--bg-surface)',
                 borderRadius: '4px',
               }}
             />
@@ -405,7 +390,7 @@ function RowSkeletons({ count }: { count: number }) {
                 className="h-3 animate-pulse"
                 style={{
                   width: '60%',
-                  background: 'var(--color-background-secondary)',
+                  background: 'var(--bg-surface)',
                   borderRadius: '4px',
                 }}
               />
@@ -413,7 +398,7 @@ function RowSkeletons({ count }: { count: number }) {
                 className="h-2.5 animate-pulse"
                 style={{
                   width: '40%',
-                  background: 'var(--color-background-secondary)',
+                  background: 'var(--bg-surface)',
                   borderRadius: '4px',
                 }}
               />
@@ -422,7 +407,7 @@ function RowSkeletons({ count }: { count: number }) {
               className="h-3 shrink-0 animate-pulse"
               style={{
                 width: '64px',
-                background: 'var(--color-background-secondary)',
+                background: 'var(--bg-surface)',
                 borderRadius: '4px',
               }}
             />

@@ -34,7 +34,7 @@ function ProductRow({ product }: { product: ShopifyProduct }) {
       <button
         onClick={() => setOpen((v) => !v)}
         className="ff-table-row w-full flex items-center gap-3 px-3.5 py-2 text-left cursor-pointer"
-        style={{ background: open ? 'var(--color-background-secondary)' : 'transparent' }}
+        style={{ background: open ? 'var(--bg-surface)' : 'transparent' }}
       >
         {product.images[0]?.src ? (
           // eslint-disable-next-line @next/next/no-img-element
@@ -42,25 +42,25 @@ function ProductRow({ product }: { product: ShopifyProduct }) {
             src={product.images[0].src}
             alt={product.images[0].alt ?? product.title}
             className="w-9 h-9 object-cover shrink-0"
-            style={{ borderRadius: '4px', border: '1px solid var(--color-border-tertiary)' }}
+            style={{ borderRadius: '4px', border: '1px solid var(--hairline)' }}
           />
         ) : (
           <div
             className="w-9 h-9 shrink-0"
-            style={{ background: 'var(--color-background-secondary)', borderRadius: '4px' }}
+            style={{ background: 'var(--bg-surface)', borderRadius: '4px' }}
           />
         )}
 
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
-            <span style={{ fontSize: '12px', fontWeight: 500, color: 'var(--color-text-primary)' }}>
+            <span style={{ fontSize: '12px', fontWeight: 500, color: 'var(--ink)' }}>
               {product.title}
             </span>
             <StatusBadge status={product.status} />
           </div>
           <div
             className="mt-0.5"
-            style={{ fontSize: '10px', color: 'var(--color-text-tertiary)' }}
+            style={{ fontSize: '10px', color: 'var(--ink-muted)' }}
           >
             {[product.vendor, product.product_type].filter(Boolean).join(' · ')}
             {' · '}
@@ -74,14 +74,14 @@ function ProductRow({ product }: { product: ShopifyProduct }) {
 
         <div
           className="ff-mono shrink-0"
-          style={{ fontSize: '11px', color: 'var(--color-text-secondary)' }}
+          style={{ fontSize: '11px', color: 'var(--ink-secondary)' }}
         >
           {product.variants[0]?.price ?? '—'}
         </div>
 
         <svg
           className={`w-3.5 h-3.5 shrink-0 transition-transform ${open ? 'rotate-180' : ''}`}
-          style={{ color: 'var(--color-text-tertiary)' }}
+          style={{ color: 'var(--ink-muted)' }}
           fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}
         >
           <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
@@ -124,7 +124,7 @@ function SectionHeader({ children }: { children: React.ReactNode }) {
       style={{
         marginBottom: '6px',
         fontWeight: 600,
-        color: 'var(--color-text-primary)',
+        color: 'var(--ink)',
       }}
     >
       {children}
@@ -138,7 +138,7 @@ function InfoRow({ label, children }: { label: string; children: React.ReactNode
       <span
         style={{
           fontSize: '11px',
-          color: 'var(--color-text-tertiary)',
+          color: 'var(--ink-muted)',
           width: '110px',
           flexShrink: 0,
         }}
@@ -146,7 +146,7 @@ function InfoRow({ label, children }: { label: string; children: React.ReactNode
         {label}
       </span>
       <span
-        style={{ fontSize: '11px', color: 'var(--color-text-primary)', flex: 1, minWidth: 0 }}
+        style={{ fontSize: '11px', color: 'var(--ink)', flex: 1, minWidth: 0 }}
         className="break-words"
       >
         {children}
@@ -167,7 +167,7 @@ function ExpandedProduct({ product }: { product: ShopifyProduct }) {
   return (
     <div
       className="px-3.5 py-3 space-y-4"
-      style={{ borderTop: '1px solid var(--color-border-tertiary)' }}
+      style={{ borderTop: '1px solid var(--hairline)' }}
     >
       {/* Product info */}
       <section>
@@ -254,7 +254,7 @@ function ExpandedProduct({ product }: { product: ShopifyProduct }) {
       <section>
         <SectionHeader>Metafields ({product.metafields.length})</SectionHeader>
         {product.metafields.length === 0 ? (
-          <span style={{ fontSize: '11px', color: 'var(--color-text-tertiary)' }}>
+          <span style={{ fontSize: '11px', color: 'var(--ink-muted)' }}>
             No metafields
           </span>
         ) : (
@@ -275,23 +275,23 @@ function ExpandedProduct({ product }: { product: ShopifyProduct }) {
                   <td style={{ whiteSpace: 'nowrap' }}>
                     {name ? (
                       <>
-                        <span style={{ color: 'var(--color-text-primary)' }}>{name}</span>
+                        <span style={{ color: 'var(--ink)' }}>{name}</span>
                         <code
                           className="ff-mono block"
-                          style={{ fontSize: '10px', color: 'var(--color-text-tertiary)' }}
+                          style={{ fontSize: '10px', color: 'var(--ink-muted)' }}
                         >
                           {rawKey}
                         </code>
                       </>
                     ) : (
-                      <code className="ff-mono" style={{ color: 'var(--color-accent)' }}>
+                      <code className="ff-mono" style={{ color: 'var(--accent-purple)' }}>
                         {rawKey}
                       </code>
                     )}
                   </td>
                   <td
                     className="ff-mono"
-                    style={{ color: 'var(--color-text-tertiary)', whiteSpace: 'nowrap' }}
+                    style={{ color: 'var(--ink-muted)', whiteSpace: 'nowrap' }}
                   >
                     {mf.type}
                   </td>
@@ -331,9 +331,9 @@ function PaginationBar({
     <div
       className="flex items-center justify-between gap-3 mt-3 px-3.5 py-2.5"
       style={{
-        border: '1px solid var(--color-border-tertiary)',
+        border: '1px solid var(--hairline)',
         borderRadius: '4px',
-        background: 'var(--color-background-tertiary)',
+        background: 'var(--bg-surface)',
       }}
     >
       <div className="flex items-center gap-2">
@@ -350,7 +350,7 @@ function PaginationBar({
             </option>
           ))}
         </select>
-        <span style={{ fontSize: '11px', color: 'var(--color-text-tertiary)' }}>per page</span>
+        <span style={{ fontSize: '11px', color: 'var(--ink-muted)' }}>per page</span>
       </div>
 
       <div className="flex items-center gap-2">
@@ -372,7 +372,7 @@ function PaginationBar({
         </button>
       </div>
 
-      <span style={{ fontSize: '11px', color: 'var(--color-text-tertiary)' }}>
+      <span style={{ fontSize: '11px', color: 'var(--ink-muted)' }}>
         Page {page}
         {totalPages != null ? ` of ${totalPages}` : ''}
       </span>
@@ -420,7 +420,7 @@ export function ProductsTable({
       {products.length === 0 && (
         <div
           className="ff-panel py-12 text-center"
-          style={{ fontSize: '12px', color: 'var(--color-text-tertiary)' }}
+          style={{ fontSize: '12px', color: 'var(--ink-muted)' }}
         >
           {hasActiveFilter
             ? 'No products match your filters.'

@@ -210,15 +210,15 @@ export function FilterSection({
         <div className="flex items-start gap-2.5">
           <span className={`mt-0.5 shrink-0 ${badgeCls}`}>{badge}</span>
           <div>
-            <h2 style={{ fontSize: '12px', fontWeight: 500, color: 'var(--color-text-primary)' }}>{title}</h2>
-            <p className="mt-0.5" style={{ fontSize: '10px', color: 'var(--color-text-tertiary)', textTransform: 'none', letterSpacing: 0 }}>{description}</p>
+            <h2 style={{ fontSize: '12px', fontWeight: 500, color: 'var(--ink)' }}>{title}</h2>
+            <p className="mt-0.5" style={{ fontSize: '10px', color: 'var(--ink-muted)', textTransform: 'none', letterSpacing: 0 }}>{description}</p>
           </div>
         </div>
       </div>
 
       <div className="p-3.5">
         {config.rules.length === 0 ? (
-          <p className="text-center py-3" style={{ fontSize: '11px', color: 'var(--color-text-tertiary)' }}>
+          <p className="text-center py-3" style={{ fontSize: '11px', color: 'var(--ink-muted)' }}>
             No rules — click + to add one
           </p>
         ) : (
@@ -227,10 +227,10 @@ export function FilterSection({
               <div key={i}>
                 {i > 0 && (
                   <div className="flex items-center gap-2 my-2">
-                    <div className="flex-1 h-px" style={{ background: 'var(--color-border-tertiary)' }} />
+                    <div className="flex-1 h-px" style={{ background: 'var(--hairline)' }} />
                     <div
                       className="inline-flex overflow-hidden"
-                      style={{ border: '1px solid var(--color-border-secondary)', borderRadius: '4px' }}
+                      style={{ border: '1px solid var(--hairline)', borderRadius: '4px' }}
                     >
                       {(['AND', 'OR'] as const).map((op, j) => (
                         <button
@@ -241,16 +241,16 @@ export function FilterSection({
                             fontSize: '10px',
                             fontWeight: 600,
                             letterSpacing: '0.4px',
-                            borderLeft: j > 0 ? '1px solid var(--color-border-secondary)' : 'none',
-                            background: config.operator === op ? '#6c5ce7' : 'transparent',
-                            color: config.operator === op ? '#ffffff' : 'var(--color-text-tertiary)',
+                            borderLeft: j > 0 ? '1px solid var(--hairline)' : 'none',
+                            background: config.operator === op ? 'var(--accent-purple)' : 'transparent',
+                            color: config.operator === op ? '#ffffff' : 'var(--ink-muted)',
                           }}
                         >
                           {op}
                         </button>
                       ))}
                     </div>
-                    <div className="flex-1 h-px" style={{ background: 'var(--color-border-tertiary)' }} />
+                    <div className="flex-1 h-px" style={{ background: 'var(--hairline)' }} />
                   </div>
                 )}
                 <RuleRow
@@ -267,7 +267,7 @@ export function FilterSection({
         <button
           onClick={onAddRule}
           className="mt-3 flex items-center gap-1.5 transition-colors"
-          style={{ fontSize: '11px', fontWeight: 500, color: 'var(--color-accent)' }}
+          style={{ fontSize: '11px', fontWeight: 500, color: 'var(--accent-purple)' }}
         >
           <PlusIcon />
           Add rule

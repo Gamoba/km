@@ -76,8 +76,8 @@ export function BucketEditorClient({
           fontSize: '11px',
           fontWeight: 500,
           borderRadius: '5px',
-          background: isActive ? 'var(--color-accent)' : 'transparent',
-          color: isActive ? '#ffffff' : 'var(--color-text-tertiary)',
+          background: isActive ? 'var(--accent-purple)' : 'transparent',
+          color: isActive ? '#ffffff' : 'var(--ink-muted)',
         }}
       >
         {n !== null && (
@@ -89,8 +89,8 @@ export function BucketEditorClient({
               borderRadius: '50%',
               fontSize: '9px',
               fontWeight: 700,
-              background: isActive ? 'rgba(255,255,255,0.25)' : done ? 'var(--color-accent)' : 'var(--color-border-tertiary)',
-              color: isActive || done ? '#ffffff' : 'var(--color-text-tertiary)',
+              background: isActive ? 'rgba(255,255,255,0.25)' : done ? 'var(--accent-purple)' : 'var(--hairline)',
+              color: isActive || done ? '#ffffff' : 'var(--ink-muted)',
             }}
           >
             {done && !isActive ? '✓' : n}
@@ -105,7 +105,7 @@ export function BucketEditorClient({
     <div className="min-h-screen">
       <header className="ff-topbar">
         <div className="flex items-center gap-3">
-          <Link href={`/feed/${feedId}/optimize`} style={{ fontSize: '12px', color: 'var(--color-accent)' }}>
+          <Link href={`/feed/${feedId}/optimize`} style={{ fontSize: '12px', color: 'var(--accent-purple)' }}>
             ← Buckets
           </Link>
           <h1 className="ff-topbar-title">
@@ -114,14 +114,14 @@ export function BucketEditorClient({
           <div className="flex items-center gap-1">
             {FLOW.map((s, i) => (
               <Fragment key={s.id}>
-                {i > 0 && <span style={{ fontSize: '11px', color: 'var(--color-text-tertiary)' }}>›</span>}
+                {i > 0 && <span style={{ fontSize: '11px', color: 'var(--ink-muted)' }}>›</span>}
                 {stepChip(s.id, s.label, i + 1, activeIndex > i)}
               </Fragment>
             ))}
           </div>
         </div>
         {memberCount !== null && (
-          <div style={{ fontSize: '11px', color: 'var(--color-text-tertiary)' }}>
+          <div style={{ fontSize: '11px', color: 'var(--ink-muted)' }}>
             {memberCount} {memberCount === 1 ? 'product' : 'products'}
           </div>
         )}
@@ -130,19 +130,21 @@ export function BucketEditorClient({
       <main className="px-4 py-4 max-w-6xl">
         {/* Soft gate: a gentle nudge, never a hard block. Run shows its own too. */}
         {noMembers && step === 'examples' && (
-          <p className="mb-3" style={{ fontSize: '11px', color: 'var(--color-text-tertiary)' }}>
+          <p className="mb-3" style={{ fontSize: '11px', color: 'var(--ink-muted)' }}>
             This bucket has no products yet — set its scope first (step 1) so the workshop has products to draw from.
           </p>
         )}
 
         {step === 'scope' && (
-          <BucketScopeTab feedId={feedId} bucketId={bucketId} initialInclude={initialInclude} initialExclude={initialExclude} />
+          <div className="space-y-3">
+            <BucketScopeTab feedId={feedId} bucketId={bucketId} initialInclude={initialInclude} initialExclude={initialExclude} />
+            <BucketCustomLabelPanel feedId={feedId} bucketId={bucketId} />
+          </div>
         )}
         {step === 'examples' && <BucketWorkshopTab feedId={feedId} bucketId={bucketId} />}
         {step === 'run' && (
           <div className="space-y-3">
             <BucketRunTab feedId={feedId} bucketId={bucketId} onRunComplete={() => setResultsKey((k) => k + 1)} />
-            <BucketCustomLabelPanel feedId={feedId} bucketId={bucketId} />
             <BucketResultsPanel feedId={feedId} bucketId={bucketId} reloadKey={resultsKey} />
           </div>
         )}

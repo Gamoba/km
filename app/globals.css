@@ -61,6 +61,14 @@
   --field-amber: #fbe6a3;
   --field-pink: #f9cce6;
   --field-mint: #c2ead7;
+
+  /* Dark sidebar — kept dark for contrast/signature against the light pages.
+     Active item = filled brand purple, white text. */
+  --sidebar-bg: var(--dark-bg);
+  --sidebar-border: rgba(255, 255, 255, 0.08);
+  --sidebar-text: rgba(255, 255, 255, 0.55);
+  --sidebar-text-active: #ffffff;
+  --sidebar-hover: rgba(255, 255, 255, 0.06);
 }
 
 /* ── FeedFlow design-system primitives ───────────────────────────────────────
@@ -206,20 +214,20 @@ body {
 
 .ff-panel {
   background: #ffffff;
-  border: 1px solid var(--color-border-tertiary);
-  border-radius: 6px;
+  border: 1px solid var(--hairline);
+  border-radius: 10px;
   overflow: hidden;
 }
 
 .ff-panel-header {
   padding: 10px 14px;
-  border-bottom: 1px solid var(--color-border-tertiary);
-  background: var(--color-background-secondary);
+  border-bottom: 1px solid var(--hairline);
+  background: var(--bg-surface);
   font-size: 10px;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.6px;
-  color: var(--color-text-tertiary);
+  color: var(--ink-muted);
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -230,7 +238,7 @@ body {
   font-size: 10px;
   text-transform: uppercase;
   letter-spacing: 0.6px;
-  color: var(--color-text-tertiary);
+  color: var(--ink-muted);
   font-weight: 500;
 }
 
@@ -242,27 +250,27 @@ body {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 5px 11px;
-  background: #6c5ce7;
+  padding: 6px 12px;
+  background: var(--accent-purple);
   color: #ffffff;
   font-size: 12px;
   font-weight: 500;
-  border-radius: 4px;
-  border: 1px solid #6c5ce7;
+  border-radius: 9px;
+  border: 1px solid var(--accent-purple);
   transition: background-color 150ms ease, border-color 150ms ease, opacity 150ms ease;
   cursor: pointer;
   white-space: nowrap;
 }
 .ff-btn-primary:hover:not(:disabled) {
-  background: #5a4bd1;
-  border-color: #5a4bd1;
+  background: var(--accent-purple-hover);
+  border-color: var(--accent-purple-hover);
 }
 .ff-btn-primary:active:not(:disabled) {
-  background: #4a3bc1;
-  border-color: #4a3bc1;
+  background: var(--accent-purple-hover);
+  border-color: var(--accent-purple-hover);
 }
 .ff-btn-primary:focus-visible {
-  outline: 2px solid #6c5ce7;
+  outline: 2px solid var(--accent-purple);
   outline-offset: 2px;
 }
 .ff-btn-primary:disabled {
@@ -274,23 +282,23 @@ body {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 5px 11px;
-  background: transparent;
-  color: var(--color-text-secondary);
+  padding: 6px 12px;
+  background: var(--bg-base);
+  color: var(--ink);
   font-size: 12px;
   font-weight: 500;
-  border-radius: 4px;
-  border: 1px solid var(--color-border-secondary);
+  border-radius: 9px;
+  border: 1px solid var(--hairline);
   transition: background-color 150ms ease, border-color 150ms ease, opacity 150ms ease;
   cursor: pointer;
   white-space: nowrap;
 }
 .ff-btn-secondary:hover:not(:disabled) {
-  background: var(--color-background-secondary);
-  border-color: var(--color-border-primary);
+  background: var(--bg-surface);
+  border-color: var(--ink);
 }
 .ff-btn-secondary:focus-visible {
-  outline: 2px solid #6c5ce7;
+  outline: 2px solid var(--accent-purple);
   outline-offset: 2px;
 }
 .ff-btn-secondary:disabled {
@@ -330,47 +338,47 @@ body {
 
 .ff-input {
   width: 100%;
-  padding: 6px 10px;
+  padding: 7px 11px;
   font-size: 12px;
   background: #ffffff;
-  border: 1px solid var(--color-border-secondary);
-  border-radius: 4px;
-  color: var(--color-text-primary);
+  border: 1px solid var(--hairline);
+  border-radius: 9px;
+  color: var(--ink);
   outline: none;
   transition: border-color 150ms ease, box-shadow 150ms ease;
 }
 .ff-input:focus {
-  border-color: var(--color-accent);
-  box-shadow: 0 0 0 2px rgba(108, 92, 231, 0.15);
+  border-color: var(--accent-purple);
+  box-shadow: 0 0 0 2px rgba(124, 92, 252, 0.18);
   outline: none;
 }
 .ff-input:disabled {
   opacity: 0.6;
   cursor: not-allowed;
-  background: var(--color-background-secondary);
+  background: var(--bg-surface);
 }
 
 .ff-select {
   width: 100%;
-  padding: 6px 10px;
+  padding: 7px 11px;
   font-size: 12px;
   background: #ffffff;
-  border: 1px solid var(--color-border-secondary);
-  border-radius: 4px;
-  color: var(--color-text-primary);
+  border: 1px solid var(--hairline);
+  border-radius: 9px;
+  color: var(--ink);
   outline: none;
   cursor: pointer;
   transition: border-color 150ms ease, box-shadow 150ms ease;
 }
 .ff-select:focus {
-  border-color: var(--color-accent);
-  box-shadow: 0 0 0 2px rgba(108, 92, 231, 0.15);
+  border-color: var(--accent-purple);
+  box-shadow: 0 0 0 2px rgba(124, 92, 252, 0.18);
   outline: none;
 }
 .ff-select:disabled {
   opacity: 0.6;
   cursor: not-allowed;
-  background: var(--color-background-secondary);
+  background: var(--bg-surface);
 }
 
 /* ── Interactive primitives ─────────────────────────────────────────────── */
@@ -380,16 +388,16 @@ body {
   transition: background-color 150ms ease;
 }
 .ff-table-row:hover {
-  background: var(--color-background-secondary);
+  background: var(--bg-surface);
 }
 
-/* Sidebar / top-nav item. Inactive items hover to a faint accent tint. */
+/* Sidebar / top-nav item. Inactive items hover to a faint white tint. */
 .ff-nav-item {
   cursor: pointer;
   transition: background-color 150ms ease, color 150ms ease;
 }
 .ff-nav-item:hover:not(.ff-nav-item-active) {
-  background: rgba(108, 92, 231, 0.1);
+  background: var(--sidebar-hover);
   color: #ffffff;
 }
 
@@ -435,25 +443,25 @@ body {
 .ff-badge {
   display: inline-flex;
   align-items: center;
-  padding: 1px 6px;
+  padding: 1px 7px;
   font-size: 10px;
   font-weight: 500;
   letter-spacing: 0.3px;
-  border-radius: 3px;
+  border-radius: 5px;
   white-space: nowrap;
 }
-.ff-badge-success { background: var(--color-badge-success-bg); color: var(--color-badge-success-text); }
-.ff-badge-warning { background: var(--color-badge-warning-bg); color: var(--color-badge-warning-text); }
-.ff-badge-danger  { background: var(--color-badge-danger-bg);  color: var(--color-badge-danger-text); }
-.ff-badge-accent  { background: var(--color-badge-accent-bg);  color: var(--color-badge-accent-text); }
-.ff-badge-neutral { background: var(--color-background-secondary); color: var(--color-text-tertiary); }
+.ff-badge-success { background: rgba(31, 180, 106, 0.13); color: #15784a; }
+.ff-badge-warning { background: rgba(232, 163, 23, 0.16); color: #946008; }
+.ff-badge-danger  { background: rgba(224, 82, 76, 0.13);  color: #b23a34; }
+.ff-badge-accent  { background: rgba(124, 92, 252, 0.13); color: #5b3fd6; }
+.ff-badge-neutral { background: var(--bg-surface); color: var(--ink-muted); }
 
 .ff-table {
   width: 100%;
   border-collapse: collapse;
 }
 .ff-table thead tr {
-  background: var(--color-background-secondary);
+  background: var(--bg-surface);
 }
 .ff-table thead th {
   padding: 7px 14px;
@@ -462,14 +470,14 @@ body {
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.7px;
-  color: var(--color-text-tertiary);
-  border-bottom: 1px solid var(--color-border-tertiary);
+  color: var(--ink-muted);
+  border-bottom: 1px solid var(--hairline);
 }
 .ff-table tbody td {
   padding: 8px 14px;
   font-size: 11px;
-  color: var(--color-text-primary);
-  border-bottom: 1px solid var(--color-border-tertiary);
+  color: var(--ink);
+  border-bottom: 1px solid var(--hairline);
   vertical-align: top;
 }
 .ff-table tbody tr:last-child td {
@@ -478,8 +486,8 @@ body {
 
 .ff-topbar {
   height: 44px;
-  background: #ffffff;
-  border-bottom: 1px solid var(--color-border-tertiary);
+  background: var(--bg-base);
+  border-bottom: 1px solid var(--hairline);
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -491,6 +499,6 @@ body {
 .ff-topbar-title {
   font-size: 13px;
   font-weight: 500;
-  color: var(--color-text-primary);
+  color: var(--ink);
 }
 

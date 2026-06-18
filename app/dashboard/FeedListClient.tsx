@@ -104,82 +104,65 @@ export function FeedListClient({
   const createDisabledTitle = connected ? undefined : 'Connect Shopify first'
 
   return (
-    <div className="ff-panel">
-      <div
-        className="ff-panel-header"
-        style={{ textTransform: 'none', letterSpacing: 0, fontSize: '11px' }}
-      >
-        <div className="flex items-center gap-2">
-          <span style={{ fontSize: '12px', fontWeight: 500, color: 'var(--color-text-primary)' }}>
-            Feeds
-          </span>
-          {feeds && (
-            <span style={{ fontSize: '11px', color: 'var(--color-text-tertiary)' }}>
-              {feeds.length}
-            </span>
-          )}
+    <section className="space-y-4">
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex items-baseline gap-2.5">
+          <span className="wl-eyebrow">Feeds</span>
+          {feeds && <span style={{ fontSize: '12px', color: 'var(--ink-muted)' }}>{feeds.length}</span>}
         </div>
         <button
           onClick={() => setShowCreate(true)}
           disabled={!connected}
           title={createDisabledTitle}
-          className="ff-btn-primary"
+          className="wl-btn-primary"
         >
           Create new feed
         </button>
       </div>
 
-      <div className="p-3.5">
-        {error && (
-          <div
-            className="p-2.5 mb-3"
-            style={{
-              background: 'var(--color-badge-danger-bg)',
-              border: '1px solid var(--color-badge-danger-text)',
-              borderRadius: '4px',
-            }}
-          >
-            <p style={{ fontSize: '12px', color: 'var(--color-badge-danger-text)' }}>{error}</p>
-          </div>
-        )}
+      {error && (
+        <div
+          className="flex items-start gap-2.5"
+          style={{ padding: '10px 12px', border: '1px solid var(--hairline)', borderRadius: '10px' }}
+        >
+          <span className="wl-dot shrink-0" style={{ background: 'var(--accent-red)', marginTop: '5px' }} />
+          <p style={{ fontSize: '12px', color: 'var(--ink-secondary)' }}>{error}</p>
+        </div>
+      )}
 
-        {feeds === null ? (
-          <div
-            className="py-12 text-center"
-            style={{ fontSize: '12px', color: 'var(--color-text-tertiary)' }}
+      {feeds === null ? (
+        <p className="py-10 text-center" style={{ fontSize: '13px', color: 'var(--ink-muted)' }}>
+          Loading feeds…
+        </p>
+      ) : feeds.length === 0 ? (
+        <div className="wl-card flex flex-col items-center gap-3" style={{ padding: '40px 16px' }}>
+          <p style={{ fontSize: '14px', color: 'var(--ink-secondary)' }}>No feeds yet</p>
+          <button
+            onClick={() => setShowCreate(true)}
+            disabled={!connected}
+            title={createDisabledTitle}
+            className="wl-btn-primary"
           >
-            Loading feeds…
-          </div>
-        ) : feeds.length === 0 ? (
-          <div className="py-12 flex flex-col items-center gap-3">
-            <p style={{ fontSize: '12px', color: 'var(--color-text-tertiary)' }}>No feeds yet</p>
-            <button
-              onClick={() => setShowCreate(true)}
-              disabled={!connected}
-              title={createDisabledTitle}
-              className="ff-btn-primary"
-            >
-              Create your first feed
-            </button>
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-            {feeds.map((f) => (
-              <FeedCard
-                key={f.id}
-                feed={f}
-                onPatched={handlePatched}
-                onDeleted={handleDeleted}
-              />
-            ))}
-          </div>
-        )}
-      </div>
+            Create your first feed
+          </button>
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+          {feeds.map((f) => (
+            <FeedCard
+              key={f.id}
+              feed={f}
+              onPatched={handlePatched}
+              onDeleted={handleDeleted}
+            />
+          ))}
+        </div>
+      )}
 
       {showCreate && (
         <FeedWizardModal projectId={projectId} onClose={() => setShowCreate(false)} />
       )}
-    </div>
+    </section>
   )
 }
 
@@ -195,26 +178,20 @@ function FeedCard({
   const [openModal, setOpenModal] = useState<'rename' | 'description' | 'delete' | null>(null)
 
   return (
-    <div className="ff-panel ff-card">
-      <div
-        className="ff-panel-header"
-        style={{ textTransform: 'none', letterSpacing: 0, fontSize: '12px', alignItems: 'flex-start' }}
-      >
+    <div className="wl-card flex flex-col">
+      <div className="flex items-start justify-between gap-2" style={{ padding: '14px 16px' }}>
         <div className="min-w-0">
           <div className="flex items-center gap-1.5 min-w-0">
             <div
               className="truncate"
-              style={{ fontSize: '13px', fontWeight: 500, color: 'var(--color-text-primary)' }}
+              style={{ fontSize: '14px', fontWeight: 500, color: 'var(--ink)' }}
             >
               {feed.name}
             </div>
             <CopyLinkButton feedId={feed.id} />
           </div>
           {feed.description && (
-            <div
-              className="truncate mt-0.5"
-              style={{ fontSize: '11px', color: 'var(--color-text-tertiary)', textTransform: 'none', letterSpacing: 0 }}
-            >
+            <div className="truncate mt-0.5" style={{ fontSize: '11px', color: 'var(--ink-muted)' }}>
               {feed.description}
             </div>
           )}
@@ -229,10 +206,10 @@ function FeedCard({
         </div>
       </div>
 
-      <div className="px-3.5 py-3 space-y-2">
+      <div className="space-y-2" style={{ padding: '0 16px 14px' }}>
         <Stat label="Products" value={String(feed.productCount)} />
-        <Stat label="Included products" value={formatIncluded(feed.includedCount, feed.productCount)} />
-        <Stat label="Excluded products" value={formatExcluded(feed.excludedCount)} />
+        <Stat label="Included" value={formatIncluded(feed.includedCount, feed.productCount)} />
+        <Stat label="Excluded" value={formatExcluded(feed.excludedCount)} />
         <Stat
           label="Products synced"
           value={
@@ -258,11 +235,11 @@ function FeedCard({
       </div>
 
       <div
-        className="px-3.5 py-2.5 flex items-center gap-2"
-        style={{ borderTop: '1px solid var(--color-border-tertiary)' }}
+        className="flex items-center"
+        style={{ padding: '12px 16px', borderTop: '1px solid var(--hairline)', marginTop: 'auto' }}
       >
-        <Link href={`/feed/${feed.id}`} className="ff-btn-primary">
-          Edit
+        <Link href={`/feed/${feed.id}`} className="wl-btn-secondary">
+          Edit feed
         </Link>
       </div>
 
@@ -523,8 +500,8 @@ function CopyLinkButton({ feedId }: { feedId: string }) {
 function Stat({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex items-center justify-between gap-2">
-      <span className="ff-label">{label}</span>
-      <span style={{ fontSize: '11px', color: 'var(--color-text-primary)' }}>{value}</span>
+      <span style={{ fontSize: '11px', color: 'var(--ink-muted)' }}>{label}</span>
+      <span style={{ fontSize: '12px', fontWeight: 500, color: 'var(--ink)' }}>{value}</span>
     </div>
   )
 }

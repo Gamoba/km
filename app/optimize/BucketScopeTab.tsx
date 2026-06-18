@@ -227,7 +227,7 @@ export function BucketScopeTab({
           the Settings/Mapping/Filters pages. Saving the scope also previews the
           matches below; membership is then confirmed separately. */}
       <div className="flex items-start justify-between gap-3">
-        <p style={{ fontSize: '11px', color: 'var(--color-text-tertiary)' }}>
+        <p style={{ fontSize: '11px', color: 'var(--ink-muted)' }}>
           Define which products this bucket targets. Save to preview the matches, decide what to do
           with any that already belong to another bucket, then confirm membership below.
         </p>
@@ -236,7 +236,7 @@ export function BucketScopeTab({
         </button>
       </div>
 
-      {error && <div style={{ fontSize: '11px', color: 'var(--color-badge-danger-text)' }}>{error}</div>}
+      {error && <div style={{ fontSize: '11px', color: 'var(--accent-red)' }}>{error}</div>}
 
       <FilterSection
         title="Include products"
@@ -269,7 +269,7 @@ export function BucketScopeTab({
           Add products manually
         </div>
         <div className="p-3.5 space-y-2.5">
-          <p style={{ fontSize: '11px', color: 'var(--color-text-tertiary)' }}>
+          <p style={{ fontSize: '11px', color: 'var(--ink-muted)' }}>
             Add specific products on top of the filter. Manual additions stay in the bucket even when you change the
             filter. {manual.length} manually added.
           </p>
@@ -277,9 +277,9 @@ export function BucketScopeTab({
           {pendingConflict && (
             <div
               className="space-y-2"
-              style={{ fontSize: '11px', padding: '8px 10px', borderRadius: '6px', background: 'var(--color-badge-warning-bg)', border: '1px solid var(--color-badge-warning-text)' }}
+              style={{ fontSize: '11px', padding: '8px 10px', borderRadius: '6px', background: 'rgba(232, 163, 23, 0.12)', border: '1px solid var(--accent-amber)' }}
             >
-              <div style={{ color: 'var(--color-badge-warning-text)' }}>
+              <div style={{ color: 'var(--accent-amber)' }}>
                 “{pendingConflict.title}” already belongs to bucket “{pendingConflict.bucketName}”. Moving it here removes
                 it from that bucket (one bucket per product).
               </div>
@@ -302,7 +302,7 @@ export function BucketScopeTab({
             className="ff-input w-full"
           />
 
-          {searching && <p style={{ fontSize: '11px', color: 'var(--color-text-tertiary)' }}>Searching…</p>}
+          {searching && <p style={{ fontSize: '11px', color: 'var(--ink-muted)' }}>Searching…</p>}
 
           {results.length > 0 && (
             <div className="space-y-1" style={{ maxHeight: '260px', overflowY: 'auto' }}>
@@ -312,13 +312,13 @@ export function BucketScopeTab({
                   <div key={p.product_ref} className="flex items-center gap-2">
                     {p.image_url ? (
                       // eslint-disable-next-line @next/next/no-img-element
-                      <img src={p.image_url} alt="" loading="lazy" className="w-8 h-8 object-cover shrink-0" style={{ borderRadius: '4px', border: '1px solid var(--color-border-tertiary)' }} />
+                      <img src={p.image_url} alt="" loading="lazy" className="w-8 h-8 object-cover shrink-0" style={{ borderRadius: '4px', border: '1px solid var(--hairline)' }} />
                     ) : (
-                      <div className="w-8 h-8 shrink-0" style={{ background: 'var(--color-background-secondary)', borderRadius: '4px' }} />
+                      <div className="w-8 h-8 shrink-0" style={{ background: 'var(--bg-surface)', borderRadius: '4px' }} />
                     )}
                     <div className="flex-1 min-w-0">
-                      <div className="truncate" style={{ fontSize: '11px', color: 'var(--color-text-primary)' }}>{p.title}</div>
-                      {p.vendor && <div className="truncate" style={{ fontSize: '10px', color: 'var(--color-text-tertiary)' }}>{p.vendor}</div>}
+                      <div className="truncate" style={{ fontSize: '11px', color: 'var(--ink)' }}>{p.title}</div>
+                      {p.vendor && <div className="truncate" style={{ fontSize: '10px', color: 'var(--ink-muted)' }}>{p.vendor}</div>}
                     </div>
                     <button
                       type="button"
@@ -342,9 +342,9 @@ export function BucketScopeTab({
                   <div
                     key={m.product_ref}
                     className="flex items-center gap-2"
-                    style={{ fontSize: '11px', padding: '4px 8px', border: '1px solid var(--color-border-secondary)', borderRadius: '5px' }}
+                    style={{ fontSize: '11px', padding: '4px 8px', border: '1px solid var(--hairline)', borderRadius: '5px' }}
                   >
-                    <span className="flex-1 min-w-0 truncate" style={{ color: 'var(--color-text-primary)' }} title={m.product_ref}>{m.title}</span>
+                    <span className="flex-1 min-w-0 truncate" style={{ color: 'var(--ink)' }} title={m.product_ref}>{m.title}</span>
                     <button type="button" onClick={() => removeManual(m.product_ref)} className="ff-btn-ghost shrink-0 w-5 h-5" aria-label="Remove manual product">×</button>
                   </div>
                 ))}
@@ -360,19 +360,19 @@ export function BucketScopeTab({
             Matches
           </div>
           <div className="p-3.5 space-y-3">
-            <div style={{ fontSize: '12px', color: 'var(--color-text-secondary)' }}>
-              <strong style={{ color: 'var(--color-text-primary)' }}>{candidates.length}</strong> products match.{' '}
+            <div style={{ fontSize: '12px', color: 'var(--ink-secondary)' }}>
+              <strong style={{ color: 'var(--ink)' }}>{candidates.length}</strong> products match.{' '}
               {overlap.inThisBucket} already in this bucket · {overlap.unassigned} unassigned ·{' '}
-              <strong style={{ color: overlap.conflicts.length ? 'var(--color-badge-warning-text)' : 'inherit' }}>
+              <strong style={{ color: overlap.conflicts.length ? 'var(--accent-amber)' : 'inherit' }}>
                 {overlap.conflicts.length}
               </strong>{' '}
               in other buckets.
               {manual.length > 0 && (
                 <>
                   {' '}
-                  <span style={{ color: 'var(--color-text-tertiary)' }}>
+                  <span style={{ color: 'var(--ink-muted)' }}>
                     + {manual.length} manual →{' '}
-                    <strong style={{ color: 'var(--color-text-primary)' }}>
+                    <strong style={{ color: 'var(--ink)' }}>
                       {new Set([...candidates, ...manualRefs]).size}
                     </strong>{' '}
                     in scope.
@@ -383,7 +383,7 @@ export function BucketScopeTab({
 
             {overlap.conflicts.length > 0 && (
               <div className="space-y-1.5">
-                <div style={{ fontSize: '11px', color: 'var(--color-text-secondary)' }}>
+                <div style={{ fontSize: '11px', color: 'var(--ink-secondary)' }}>
                   These already belong to another bucket. Check to pull them into THIS bucket (they move,
                   enforcing one bucket per product); leave unchecked to keep them where they are:
                 </div>
@@ -391,7 +391,7 @@ export function BucketScopeTab({
                   type="button"
                   onClick={togglePullAll}
                   className="ff-btn-ghost"
-                  style={{ fontSize: '10px', fontWeight: 500, color: 'var(--color-accent)', padding: '2px 6px', alignSelf: 'flex-start' }}
+                  style={{ fontSize: '10px', fontWeight: 500, color: 'var(--accent-purple)', padding: '2px 6px', alignSelf: 'flex-start' }}
                 >
                   {allPulledIn ? 'Deselect all' : 'Select all'}
                 </button>
@@ -399,8 +399,8 @@ export function BucketScopeTab({
                   {overlap.conflicts.map((c) => (
                     <label key={c.product_ref} className="flex items-center gap-2" style={{ fontSize: '11px' }}>
                       <input type="checkbox" checked={pullIn.has(c.product_ref)} onChange={() => togglePull(c.product_ref)} />
-                      <span style={{ color: 'var(--color-text-secondary)' }} title={c.product_ref}>{c.title}</span>
-                      <span style={{ color: 'var(--color-text-tertiary)' }}>in “{c.bucketName}”</span>
+                      <span style={{ color: 'var(--ink-secondary)' }} title={c.product_ref}>{c.title}</span>
+                      <span style={{ color: 'var(--ink-muted)' }}>in “{c.bucketName}”</span>
                       {c.status && (
                         <span className={`ff-badge ${c.status === 'human_edited' ? 'ff-badge-warning' : 'ff-badge-neutral'}`}>
                           {c.status}
@@ -416,7 +416,7 @@ export function BucketScopeTab({
               <button onClick={handleSave} disabled={isSaving} className="ff-btn-primary">
                 {isSaving ? 'Saving…' : saved ? 'Saved' : `Confirm membership (${finalRefs.length} products)`}
               </button>
-              <span style={{ fontSize: '10px', color: 'var(--color-text-tertiary)' }}>
+              <span style={{ fontSize: '10px', color: 'var(--ink-muted)' }}>
                 Sets this bucket&apos;s membership to the {finalRefs.length} products shown.
               </span>
             </div>
@@ -425,7 +425,7 @@ export function BucketScopeTab({
       )}
 
       {stale && candidates && (
-        <p style={{ fontSize: '11px', color: 'var(--color-text-tertiary)' }}>
+        <p style={{ fontSize: '11px', color: 'var(--ink-muted)' }}>
           Filter changed — “Save scope” again to refresh the matches before confirming membership.
         </p>
       )}

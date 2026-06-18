@@ -725,25 +725,3 @@ export async function runBucketRefs(
   return outcomes
 }
 
-// Dry run on a sample of the bucket's membership — no persist (experimentation).
-export async function previewBucket(
-  feedId: string,
-  bucketId: string,
-  limit: number
-): Promise<OptimizationOutcome[]> {
-  const bucket = await getBucket(feedId, bucketId)
-  if (!bucket) throw new Error('Bucket ikke fundet')
-  const refs = (await getBucketMembership(feedId, bucketId)).slice(0, Math.max(1, Math.min(limit, 50)))
-  if (refs.length === 0) return []
-
-  const { config, rulesByType } = await buildBucketContext(feedId, bucketId, bucket.method)
-  const [products, existing] = await Promise.all([
-    fetchProductsByRefs(feedId, refs),
-    fetchExistingByRefs(feedId, refs),
-  ])
-  const origByRef = new Map(existing.map((r) => [r.product_ref, r.original_title]))
-  const ops = products.map((p) => buildOp(p, origByRef.get(p.shopify_id)))
-
-  const client = createOptimizerClient()
-  return optimizeBatch(client, ops, bucket.method, config, rulesByType)
-}

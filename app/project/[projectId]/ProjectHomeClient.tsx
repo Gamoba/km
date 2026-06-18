@@ -38,34 +38,52 @@ export function ProjectHomeClient({
     setReadMarketsMissing(result.readMarketsMissing)
   }
 
-  return (
-    <div className="min-h-screen">
-      <header className="ff-topbar">
-        <div className="flex items-center gap-3 min-w-0">
-          <Link
-            href="/"
-            style={{ fontSize: '11px', color: 'var(--color-text-tertiary)', textDecoration: 'none' }}
-          >
-            Projects
-          </Link>
-          <span style={{ color: 'var(--color-text-tertiary)' }}>/</span>
-          <h1 className="ff-topbar-title truncate">{projectName}</h1>
-          <span className={badge.className}>{badge.label}</span>
-        </div>
-        <button onClick={() => setConnectOpen(true)} className="ff-btn-secondary">
-          {connected ? 'Replace token' : 'Connect Shopify'}
-        </button>
-      </header>
+  const statusDot =
+    status === 'connected' ? 'var(--accent-green)' : status === 'error' ? 'var(--accent-red)' : 'var(--accent-amber)'
 
-      <main className="px-4 py-4 max-w-6xl space-y-3">
-        {/* Connection panel */}
-        <div className="ff-panel">
-          <div className="ff-panel-header" style={{ textTransform: 'none', letterSpacing: 0, fontSize: '11px' }}>
-            <span style={{ fontSize: '12px', fontWeight: 500, color: 'var(--color-text-primary)' }}>
-              Shopify connection
+  return (
+    <div className="min-h-screen" style={{ background: 'var(--bg-base)' }}>
+      <main className="max-w-5xl mx-auto px-6 py-10 space-y-8">
+        {/* Hero */}
+        <header className="space-y-3.5">
+          <div className="flex items-center gap-2.5">
+            <Link href="/" className="wl-eyebrow" style={{ textDecoration: 'none' }}>
+              Projects
+            </Link>
+            <span className="wl-eyebrow">/</span>
+            <span className="wl-pill">
+              <span className="wl-dot" style={{ background: statusDot }} />
+              {badge.label}
             </span>
           </div>
-          <div className="p-3.5">
+          <div className="flex items-start justify-between gap-4 flex-wrap">
+            <div className="space-y-2 min-w-0">
+              <h1
+                className="truncate"
+                style={{ fontSize: '34px', fontWeight: 500, letterSpacing: '-0.02em', lineHeight: 1.1, color: 'var(--ink)' }}
+              >
+                {projectName}
+              </h1>
+              <p style={{ fontSize: '15px', lineHeight: 1.6, color: 'var(--ink-secondary)' }}>
+                {shopUrl ? (
+                  <span className="ff-mono">{shopUrl}</span>
+                ) : (
+                  'Connect this project to a Shopify store to start building feeds.'
+                )}
+              </p>
+            </div>
+            <button onClick={() => setConnectOpen(true)} className="wl-btn-secondary shrink-0">
+              {connected ? 'Replace token' : 'Connect Shopify'}
+            </button>
+          </div>
+        </header>
+
+        {/* Connection panel */}
+        <div className="wl-card">
+          <div style={{ padding: '14px 18px', borderBottom: '1px solid var(--hairline)' }}>
+            <span style={{ fontSize: '15px', fontWeight: 500, color: 'var(--ink)' }}>Shopify connection</span>
+          </div>
+          <div className="p-4">
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <ConnInfo label="Status" value={badge.label} />
               <ConnInfo label="Shop URL" value={shopUrl ?? '—'} mono />
@@ -86,35 +104,17 @@ export function ProjectHomeClient({
             </div>
 
             {!connected && (
-              <div
-                className="mt-3 flex items-start gap-2 p-2.5"
-                style={{
-                  background: 'var(--color-badge-warning-bg)',
-                  border: '1px solid var(--color-badge-warning-text)',
-                  borderRadius: '4px',
-                }}
-              >
-                <p style={{ fontSize: '11px', color: 'var(--color-badge-warning-text)' }}>
-                  Connect this project to Shopify before creating feeds — markets and product sync need a
-                  verified access token.
-                </p>
-              </div>
+              <ConnNotice>
+                Connect this project to Shopify before creating feeds — markets and product sync need a
+                verified access token.
+              </ConnNotice>
             )}
 
             {connected && readMarketsMissing && (
-              <div
-                className="mt-3 flex items-start gap-2 p-2.5"
-                style={{
-                  background: 'var(--color-badge-warning-bg)',
-                  border: '1px solid var(--color-badge-warning-text)',
-                  borderRadius: '4px',
-                }}
-              >
-                <p style={{ fontSize: '11px', color: 'var(--color-badge-warning-text)' }}>
-                  Connected, but the app is missing the <strong>read_markets</strong> scope. Product sync
-                  works, but markets won’t load in the feed wizard.
-                </p>
-              </div>
+              <ConnNotice>
+                Connected, but the app is missing the <strong>read_markets</strong> scope. Product sync
+                works, but markets won’t load in the feed wizard.
+              </ConnNotice>
             )}
           </div>
         </div>
@@ -136,20 +136,33 @@ export function ProjectHomeClient({
   )
 }
 
+// Calm inline notice — an amber dot does the colour work, no filled box.
+function ConnNotice({ children }: { children: React.ReactNode }) {
+  return (
+    <div
+      className="mt-3 flex items-start gap-2.5"
+      style={{ padding: '10px 12px', border: '1px solid var(--hairline)', borderRadius: '10px' }}
+    >
+      <span className="wl-dot shrink-0" style={{ background: 'var(--accent-amber)', marginTop: '5px' }} />
+      <p style={{ fontSize: '12px', lineHeight: 1.5, color: 'var(--ink-secondary)' }}>{children}</p>
+    </div>
+  )
+}
+
 function ConnInfo({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
   return (
     <div
-      className="px-3 py-2"
+      className="px-3.5 py-2.5"
       style={{
-        background: 'var(--color-background-secondary)',
-        border: '1px solid var(--color-border-tertiary)',
-        borderRadius: '4px',
+        background: 'var(--bg-surface)',
+        border: '1px solid var(--hairline)',
+        borderRadius: '10px',
       }}
     >
-      <p className="ff-label">{label}</p>
+      <p className="wl-eyebrow">{label}</p>
       <p
-        className={`mt-0.5 truncate${mono ? ' ff-mono' : ''}`}
-        style={{ fontSize: '12px', fontWeight: 500, color: 'var(--color-text-primary)' }}
+        className={`mt-1 truncate${mono ? ' ff-mono' : ''}`}
+        style={{ fontSize: '13px', fontWeight: 500, color: 'var(--ink)' }}
       >
         {value}
       </p>

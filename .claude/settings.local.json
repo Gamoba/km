@@ -83,7 +83,13 @@
       "PowerShell(npx tsc --noEmit 2>&1 | Select-Object -First 25; if \\($?\\) { \"tsc clean\" })",
       "PowerShell(npx eslint app/feed/FeedClient.tsx app/feed/FeedValidation.tsx app/dashboard/FeedSection.tsx 2>&1 | Select-Object -First 30)",
       "PowerShell($c = Get-NetTCPConnection -LocalPort 3000 -State Listen -ErrorAction SilentlyContinue; if \\($c\\) { $c.OwningProcess | Select-Object -Unique | ForEach-Object { try { Stop-Process -Id $_ -Force -ErrorAction Stop; \"killed PID $_\" } catch { \"could not kill $_\" } } } else { \"port 3000 already free\" }; Start-Sleep -Seconds 1; if \\(Get-NetTCPConnection -LocalPort 3000 -State Listen -ErrorAction SilentlyContinue\\) { \"still held\" } else { \"port 3000 free\" })",
-      "PowerShell(try { Remove-Item -Recurse -Force \"C:\\\\Users\\\\kenne\\\\km-product-feed-generator\\\\.next\" -ErrorAction Stop; \".next cleared\" } catch { \"clear note: $\\($_.Exception.Message\\)\" })"
+      "PowerShell(try { Remove-Item -Recurse -Force \"C:\\\\Users\\\\kenne\\\\km-product-feed-generator\\\\.next\" -ErrorAction Stop; \".next cleared\" } catch { \"clear note: $\\($_.Exception.Message\\)\" })",
+      "PowerShell(npx tsc --noEmit 2>&1 | Select-Object -First 20; if \\($?\\) { \"tsc clean\" })",
+      "PowerShell(npx eslint app/components/Sidebar.tsx app/components/AppShell.tsx \"app/project/[projectId]/ProjectHomeClient.tsx\" app/dashboard/FeedListClient.tsx 2>&1 | Select-Object -First 30)",
+      "PowerShell(npx tsc --noEmit 2>&1 | Select-Object -First 20; Write-Output \"---LINT---\"; npx eslint app/products/ProductsClient.tsx app/dashboard/ProductsTable.tsx 2>&1 | Select-Object -First 25)",
+      "PowerShell(npx tsc --noEmit 2>&1 | Select-Object -First 12; if \\($?\\) { \"tsc clean\" })",
+      "PowerShell(npx tsc --noEmit 2>&1 | Select-Object -First 10; if \\($?\\) { \"tsc clean\" }; curl.exe -s -o NUL -w \"dev=%{http_code}`n\" http://localhost:3000/login)",
+      "PowerShell(npx tsc --noEmit 2>&1 | Select-Object -First 8; if \\($?\\) { \"tsc clean\" }; curl.exe -s -o NUL -w \"dev=%{http_code}`n\" http://localhost:3000/login)"
     ]
   }
 }

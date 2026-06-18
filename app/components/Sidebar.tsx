@@ -4,7 +4,7 @@ import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
-import { colors, layout } from '@/lib/design-tokens'
+import { layout } from '@/lib/design-tokens'
 
 // ── Nav items ──────────────────────────────────────────────────────────────
 
@@ -194,13 +194,11 @@ export function Sidebar() {
         href={href}
         className={`ff-nav-item${isActive ? ' ff-nav-item-active' : ''} flex items-center gap-2.5 px-3 py-2`}
         style={{
-          fontSize: '12px',
-          fontWeight: 400,
-          borderRadius: '5px',
-          borderLeft: `2px solid ${isActive ? colors.sidebar.activeBorder : 'transparent'}`,
-          paddingLeft: '10px',
-          background: isActive ? colors.sidebar.activeBg : 'transparent',
-          color: isActive ? colors.sidebar.textActive : colors.sidebar.textInactive,
+          fontSize: '13px',
+          fontWeight: isActive ? 500 : 400,
+          borderRadius: '9px',
+          background: isActive ? 'var(--accent-purple)' : 'transparent',
+          color: isActive ? 'var(--sidebar-text-active)' : 'var(--sidebar-text)',
         }}
       >
         <NavIcon name={icon} />
@@ -242,25 +240,25 @@ export function Sidebar() {
       className="flex-none flex flex-col h-full"
       style={{
         width: layout.sidebarWidth,
-        background: colors.sidebar.bg,
-        borderRight: `1px solid ${colors.sidebar.border}`,
+        background: 'var(--sidebar-bg)',
+        borderRight: '1px solid var(--sidebar-border)',
       }}
     >
       {/* Logo */}
       <div
         className="px-4 py-4 shrink-0 flex items-center gap-2"
-        style={{ borderBottom: `1px solid ${colors.sidebar.border}` }}
+        style={{ borderBottom: '1px solid var(--sidebar-border)' }}
       >
         <div
           className="w-6 h-6 flex items-center justify-center shrink-0"
-          style={{ background: colors.accent, borderRadius: '5px' }}
+          style={{ background: 'var(--accent-purple)', borderRadius: '7px' }}
         >
           <LogoIcon />
         </div>
         <span
           style={{
-            color: colors.sidebar.textActive,
-            fontSize: '13px',
+            color: 'var(--sidebar-text-active)',
+            fontSize: '14px',
             fontWeight: 500,
             letterSpacing: '-0.01em',
           }}
@@ -278,18 +276,18 @@ export function Sidebar() {
       {/* Footer */}
       <div
         className="px-3 py-3 shrink-0 space-y-2"
-        style={{ borderTop: `1px solid ${colors.sidebar.border}` }}
+        style={{ borderTop: '1px solid var(--sidebar-border)' }}
       >
         {marketLabel && (
           <div
             className="inline-flex px-2 py-0.5"
             style={{
-              background: colors.sidebar.marketBg,
-              color: colors.sidebar.marketText,
+              background: 'rgba(124, 92, 252, 0.22)',
+              color: '#ffffff',
               fontFamily: 'var(--font-mono)',
               fontSize: '10px',
               letterSpacing: '0.4px',
-              borderRadius: '3px',
+              borderRadius: '5px',
             }}
           >
             {marketLabel}
@@ -299,7 +297,7 @@ export function Sidebar() {
           <div
             className="truncate"
             style={{
-              color: colors.sidebar.textInactive,
+              color: 'var(--sidebar-text)',
               fontSize: '11px',
             }}
           >
@@ -311,8 +309,8 @@ export function Sidebar() {
           className="ff-nav-item w-full flex items-center gap-2.5 px-2 py-1.5"
           style={{
             fontSize: '12px',
-            color: colors.sidebar.textInactive,
-            borderRadius: '5px',
+            color: 'var(--sidebar-text)',
+            borderRadius: '7px',
           }}
         >
           <LogOutIcon />

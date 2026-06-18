@@ -242,7 +242,7 @@ const sel = 'ff-select'
 const inp = 'ff-input'
 const inpSm = 'ff-input'
 const btnSm =
-  'px-2 py-1 rounded text-[11px] font-medium transition-colors border border-[var(--color-border-secondary)] bg-white text-[var(--color-text-secondary)] hover:bg-[var(--color-background-secondary)]'
+  'px-2 py-1 rounded text-[11px] font-medium transition-colors border border-[var(--hairline)] bg-white text-[var(--ink-secondary)] hover:bg-[var(--bg-surface)]'
 const miniSel = 'ff-select shrink-0'
 
 // ── Live preview: client-side resolver ────────────────────────────────────
@@ -594,7 +594,7 @@ function CombineChipsEditor({
           minHeight: '42px',
           padding: '8px 10px',
           background: '#ffffff',
-          border: '1px solid var(--color-border-secondary)',
+          border: '1px solid var(--hairline)',
           borderRadius: '6px',
         }}
       >
@@ -602,7 +602,7 @@ function CombineChipsEditor({
           <span
             style={{
               fontSize: '11px',
-              color: 'var(--color-text-tertiary)',
+              color: 'var(--ink-muted)',
               fontStyle: 'italic',
             }}
           >
@@ -629,7 +629,7 @@ function CombineChipsEditor({
         <button
           type="button"
           onClick={() => setPicker(picker === 'field' ? 'none' : 'field')}
-          className={`${btnSm} bg-indigo-50 text-indigo-600 hover:bg-indigo-100`}
+          className={`${btnSm} bg-[rgba(124,92,252,0.08)] text-[var(--accent-purple)] hover:bg-[rgba(124,92,252,0.14)]`}
           aria-expanded={picker === 'field'}
         >
           + Field
@@ -695,11 +695,11 @@ function CombineChip({
         padding: '4px 4px 4px 8px',
         fontSize: '11px',
         background: isField
-          ? 'var(--color-badge-accent-bg)'
-          : 'var(--color-background-secondary)',
+          ? 'rgba(124, 92, 252, 0.13)'
+          : 'var(--bg-surface)',
         color: isField
-          ? 'var(--color-badge-accent-text)'
-          : 'var(--color-text-secondary)',
+          ? '#5b3fd6'
+          : 'var(--ink-secondary)',
         borderRadius: '4px',
         opacity: isDragging ? 0.4 : 1,
         transition: 'opacity 0.12s ease',
@@ -750,7 +750,7 @@ function DropIndicator({ side }: { side: 'left' | 'right' }) {
         bottom: 0,
         [side]: '-5px',
         width: '2px',
-        background: 'var(--color-accent)',
+        background: 'var(--accent-purple)',
         borderRadius: '1px',
         pointerEvents: 'none',
       }}
@@ -800,7 +800,7 @@ function FieldPickerPanel({
     <div
       style={{
         background: '#ffffff',
-        border: '1px solid var(--color-border-secondary)',
+        border: '1px solid var(--hairline)',
         borderRadius: '6px',
         maxHeight: '280px',
         display: 'flex',
@@ -808,7 +808,7 @@ function FieldPickerPanel({
         overflow: 'hidden',
       }}
     >
-      <div className="p-2" style={{ borderBottom: '1px solid var(--color-border-tertiary)' }}>
+      <div className="p-2" style={{ borderBottom: '1px solid var(--hairline)' }}>
         <input
           type="search"
           autoFocus
@@ -826,7 +826,7 @@ function FieldPickerPanel({
           <>
             <div
               className="ff-label"
-              style={{ padding: '6px 10px', background: 'var(--color-background-tertiary)' }}
+              style={{ padding: '6px 10px', background: 'var(--bg-surface)' }}
             >
               Shopify fields
             </div>
@@ -844,7 +844,7 @@ function FieldPickerPanel({
           <>
             <div
               className="ff-label"
-              style={{ padding: '6px 10px', background: 'var(--color-background-tertiary)' }}
+              style={{ padding: '6px 10px', background: 'var(--bg-surface)' }}
             >
               Metafields
             </div>
@@ -866,7 +866,7 @@ function FieldPickerPanel({
         {filteredStandard.length === 0 && filteredMeta.length === 0 && (
           <p
             className="text-center"
-            style={{ padding: '12px', fontSize: '11px', color: 'var(--color-text-tertiary)' }}
+            style={{ padding: '12px', fontSize: '11px', color: 'var(--ink-muted)' }}
           >
             No fields match
           </p>
@@ -900,11 +900,11 @@ function PickerOption({
         background: 'transparent',
         border: 'none',
         cursor: 'pointer',
-        color: mono ? 'var(--color-accent)' : 'var(--color-text-primary)',
+        color: mono ? 'var(--accent-purple)' : 'var(--ink)',
       }}
       className={mono ? 'ff-mono' : undefined}
       onMouseEnter={(e) => {
-        e.currentTarget.style.background = 'var(--color-background-secondary)'
+        e.currentTarget.style.background = 'var(--bg-surface)'
       }}
       onMouseLeave={(e) => {
         e.currentTarget.style.background = 'transparent'
@@ -917,7 +917,7 @@ function PickerOption({
           style={{
             marginLeft: '8px',
             fontSize: '10px',
-            color: 'var(--color-text-tertiary)',
+            color: 'var(--ink-muted)',
           }}
         >
           {secondary}
@@ -1092,7 +1092,7 @@ function ConfigEditor({
           <button
             type="button"
             onClick={() => set('pairs', [...pairs, { find: '', replace: '' }])}
-            className={`${btnSm} bg-indigo-50 text-indigo-600 hover:bg-indigo-100`}
+            className={`${btnSm} bg-[rgba(124,92,252,0.08)] text-[var(--accent-purple)] hover:bg-[rgba(124,92,252,0.14)]`}
           >
             + Add pair
           </button>
@@ -1113,7 +1113,7 @@ function ConfigEditor({
             value={Number(config.maxChars ?? 500)}
             onChange={(e) => set('maxChars', Number(e.target.value))}
             min={1}
-            className="w-24 px-3 py-2 rounded-lg border border-gray-200 text-sm text-center focus:outline-none focus:ring-2 focus:ring-indigo-500/20 shrink-0"
+            className="w-24 px-3 py-2 rounded-lg border border-gray-200 text-sm text-center focus:outline-none focus:ring-2 focus:ring-[rgba(124,92,252,0.2)] shrink-0"
           />
           <span className="text-sm text-gray-500 shrink-0">chars</span>
         </div>
@@ -1135,7 +1135,7 @@ function ConfigEditor({
           onChange={(e) => onChange({ ...config, prompt: e.target.value })}
           rows={2}
           placeholder="Describe what Claude should generate based on the product data..."
-          className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-300 resize-none"
+          className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-[rgba(124,92,252,0.2)] focus:border-[var(--accent-purple)] resize-none"
         />
       )
 
@@ -1160,7 +1160,7 @@ function ConditionModeToggle({
     <div
       className="inline-flex shrink-0 self-stretch overflow-hidden"
       style={{
-        border: '1px solid var(--color-border-secondary)',
+        border: '1px solid var(--hairline)',
         borderRadius: '4px',
       }}
       role="group"
@@ -1177,9 +1177,9 @@ function ConditionModeToggle({
               padding: '0 10px',
               fontSize: '11px',
               fontWeight: 500,
-              borderLeft: idx > 0 ? '1px solid var(--color-border-secondary)' : 'none',
-              background: active ? '#6c5ce7' : '#ffffff',
-              color: active ? '#ffffff' : 'var(--color-text-secondary)',
+              borderLeft: idx > 0 ? '1px solid var(--hairline)' : 'none',
+              background: active ? 'var(--accent-purple)' : '#ffffff',
+              color: active ? '#ffffff' : 'var(--ink-secondary)',
               cursor: active ? 'default' : 'pointer',
               transition: 'background 0.12s ease, color 0.12s ease',
             }}
@@ -1340,7 +1340,7 @@ function OnlyIfEditor({
         </button>
       </div>
 
-      <div className="flex gap-2 items-start border-t border-indigo-100 pt-2">
+      <div className="flex gap-2 items-start border-t border-[rgba(124,92,252,0.18)] pt-2">
         <span className={lbl}>ELSE</span>
         <select
           value={elseBranch.type}
@@ -1456,13 +1456,22 @@ function FieldRow({
   }
 
   return (
-    <div className="px-3.5 py-2.5 group">
+    <div className="px-4 py-3.5 group">
       <div className="flex items-start gap-3">
         <div className="w-52 pt-1.5 shrink-0">
           <div className="flex items-center justify-between gap-1.5">
             <code
               className="ff-mono truncate"
-              style={{ fontSize: '11px', color: 'var(--color-text-primary)' }}
+              style={{
+                fontSize: '11px',
+                color: '#5b3fd6',
+                background: 'rgba(124, 92, 252, 0.1)',
+                border: '1px solid rgba(124, 92, 252, 0.2)',
+                borderRadius: '6px',
+                padding: '2px 8px',
+                display: 'inline-block',
+                maxWidth: '100%',
+              }}
             >
               {displayField}
             </code>
@@ -1477,10 +1486,10 @@ function FieldRow({
                     padding: '2px 6px',
                     fontSize: '10px',
                     fontWeight: 500,
-                    border: '1px solid var(--color-border-secondary)',
+                    border: '1px solid var(--hairline)',
                     borderRadius: '4px',
                     background: '#ffffff',
-                    color: 'var(--color-accent)',
+                    color: 'var(--accent-purple)',
                     cursor: 'pointer',
                     transition: 'opacity 0.12s ease',
                     lineHeight: 1.2,
@@ -1502,10 +1511,10 @@ function FieldRow({
                     alignItems: 'center',
                     justifyContent: 'center',
                     padding: 0,
-                    border: '1px solid var(--color-border-tertiary)',
+                    border: '1px solid var(--hairline)',
                     borderRadius: '4px',
                     background: 'transparent',
-                    color: 'var(--color-text-tertiary)',
+                    color: 'var(--ink-muted)',
                     cursor: 'pointer',
                     fontSize: '12px',
                     lineHeight: 1,
@@ -1546,7 +1555,7 @@ function FieldRow({
               onClick={showOnlyIf ? removeOnlyIf : openOnlyIf}
               className={`px-2.5 py-2 rounded-lg text-xs font-medium transition-colors ${
                 hasConditions
-                  ? 'bg-indigo-100 text-indigo-700 hover:bg-indigo-200'
+                  ? 'bg-[rgba(124,92,252,0.14)] text-[#5b3fd6] hover:bg-[rgba(124,92,252,0.2)]'
                   : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
               }`}
             >
@@ -1574,7 +1583,7 @@ function FieldRow({
           <div className="w-40 shrink-0" />
           <div className="flex-1 min-w-0 flex items-center gap-1.5">
             {previewValue === '__AI__' ? (
-              <span className="inline-flex items-center px-1.5 py-0.5 rounded text-xs bg-purple-100 text-purple-700 font-medium">
+              <span className="inline-flex items-center px-1.5 py-0.5 rounded text-xs bg-[rgba(124,92,252,0.14)] text-[#5b3fd6] font-medium">
                 AI – cannot be previewed
               </span>
             ) : previewValue === '' ? (
@@ -1582,7 +1591,7 @@ function FieldRow({
             ) : (
               <>
                 <span className="text-xs text-gray-300 shrink-0">→</span>
-                <span className="text-xs text-indigo-600 break-all line-clamp-2">{previewValue}</span>
+                <span className="text-xs text-[var(--accent-purple)] break-all line-clamp-2">{previewValue}</span>
               </>
             )}
           </div>
@@ -1590,7 +1599,16 @@ function FieldRow({
       )}
 
       {showOnlyIf && state.type !== '' && onlyIf && (
-        <div className="mt-2 ml-52 pl-4 border-l-2 border-indigo-200">
+        <div
+          className="mt-2.5 ml-52"
+          style={{
+            background: 'var(--bg-surface)',
+            border: '1px solid var(--hairline)',
+            borderLeft: '2px solid var(--accent-purple)',
+            borderRadius: '8px',
+            padding: '2px 14px 8px',
+          }}
+        >
           <OnlyIfEditor
             value={onlyIf}
             onChange={(next) => onConfigChange({ ...state.config, onlyIf: next })}
@@ -1726,7 +1744,7 @@ function ShopifyFieldsModal({
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search field…"
-            className="mt-3 w-full px-3 py-2 rounded-lg border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-300"
+            className="mt-3 w-full px-3 py-2 rounded-lg border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-[rgba(124,92,252,0.2)] focus:border-[var(--accent-purple)]"
           />
         </div>
 
@@ -1909,7 +1927,7 @@ function ProductPickerModal({
             onChange={(e) => setSearch(e.target.value)}
             // eslint-disable-next-line jsx-a11y/no-autofocus
             autoFocus
-            className="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
+            className="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm focus:border-[var(--accent-purple)] focus:outline-none focus:ring-2 focus:ring-[rgba(124,92,252,0.2)]"
           />
         </div>
         <div
@@ -1927,7 +1945,7 @@ function ProductPickerModal({
               <button
                 key={p.id}
                 onClick={() => onSelect(p)}
-                className="w-full text-left px-4 py-3 hover:bg-indigo-50 border-b border-gray-50 transition-colors flex items-center gap-3"
+                className="w-full text-left px-4 py-3 hover:bg-[rgba(124,92,252,0.08)] border-b border-gray-50 transition-colors flex items-center gap-3"
               >
                 {(p.images[0]?.src as string | undefined) ? (
                   // eslint-disable-next-line @next/next/no-img-element
@@ -1950,7 +1968,7 @@ function ProductPickerModal({
         {total > 0 && (
           <div
             className="px-4 py-2.5 flex items-center justify-between gap-2 shrink-0"
-            style={{ borderTop: '1px solid var(--color-border-tertiary)' }}
+            style={{ borderTop: '1px solid var(--hairline)' }}
           >
             <button
               type="button"
@@ -1960,7 +1978,7 @@ function ProductPickerModal({
             >
               Previous
             </button>
-            <span style={{ fontSize: '11px', color: 'var(--color-text-tertiary)' }}>
+            <span style={{ fontSize: '11px', color: 'var(--ink-muted)' }}>
               Page {page} of {totalPages} · {total} products
             </span>
             <button
@@ -2079,7 +2097,7 @@ function AISuggestionsModal({
                     checked={!same && selected.has(s.google_field)}
                     disabled={same}
                     onChange={() => { if (!same) toggle(s.google_field) }}
-                    className="mt-0.5 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 shrink-0"
+                    className="mt-0.5 rounded border-gray-300 text-[var(--accent-purple)] focus:ring-indigo-500 shrink-0"
                   />
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
@@ -2092,7 +2110,7 @@ function AISuggestionsModal({
                           Static: &quot;{s.static_value ?? ''}&quot;
                         </code>
                       ) : (
-                        <code className="text-xs font-mono text-indigo-700 bg-indigo-50 px-1.5 py-0.5 rounded">
+                        <code className="text-xs font-mono text-[#5b3fd6] bg-[rgba(124,92,252,0.08)] px-1.5 py-0.5 rounded">
                           {s.shopify_field ?? '—'}
                         </code>
                       )}
@@ -2182,7 +2200,7 @@ function SectionPanel({
       className="ff-mono"
       style={{
         fontSize: '10px',
-        color: 'var(--color-text-tertiary)',
+        color: 'var(--ink-muted)',
         textTransform: 'none',
         letterSpacing: 0,
       }}
@@ -2203,7 +2221,7 @@ function SectionPanel({
             style={{
               transform: open ? 'rotate(90deg)' : 'rotate(0deg)',
               transition: 'transform 0.12s ease',
-              color: 'var(--color-text-tertiary)',
+              color: 'var(--ink-muted)',
               flexShrink: 0,
             }}
           >
@@ -2232,8 +2250,8 @@ function SectionPanel({
       )}
       {open && (
         <div
-          style={{ borderColor: 'var(--color-border-tertiary)' }}
-          className="divide-y divide-[var(--color-border-tertiary)]"
+          style={{ borderColor: 'var(--hairline)' }}
+          className="divide-y divide-[color:rgba(26,26,24,0.13)]"
         >
           {fields.map((field) => (
             <FieldRow
@@ -2312,7 +2330,7 @@ function CustomFieldsSection({
           className="ff-mono"
           style={{
             fontSize: '10px',
-            color: 'var(--color-text-tertiary)',
+            color: 'var(--ink-muted)',
             textTransform: 'none',
             letterSpacing: 0,
           }}
@@ -2321,13 +2339,13 @@ function CustomFieldsSection({
         </span>
       </div>
       <div
-        style={{ borderColor: 'var(--color-border-tertiary)' }}
-        className="divide-y divide-[var(--color-border-tertiary)]"
+        style={{ borderColor: 'var(--hairline)' }}
+        className="divide-y divide-[color:rgba(26,26,24,0.13)]"
       >
         {customFields.length === 0 && !showAdd && (
           <div
             className="px-3.5 py-3"
-            style={{ fontSize: '11px', color: 'var(--color-text-tertiary)' }}
+            style={{ fontSize: '11px', color: 'var(--ink-muted)' }}
           >
             No custom fields yet. Add fields that don&apos;t exist in the Google Shopping standard —
             they are written to the feed without the <code className="ff-mono">g:</code> prefix.
@@ -2380,9 +2398,9 @@ function CustomFieldsSection({
               </button>
             </div>
             {error && (
-              <p style={{ fontSize: '11px', color: 'var(--color-badge-danger-text)' }}>{error}</p>
+              <p style={{ fontSize: '11px', color: 'var(--accent-red)' }}>{error}</p>
             )}
-            <p style={{ fontSize: '11px', color: 'var(--color-text-tertiary)' }}>
+            <p style={{ fontSize: '11px', color: 'var(--ink-muted)' }}>
               Letters, digits and underscore only. The field is written to XML as{' '}
               <code className="ff-mono">{`<${name.trim() || 'field_name'}>…</${name.trim() || 'field_name'}>`}</code>
             </p>
@@ -2440,7 +2458,7 @@ function AddFieldModal({
           className="ff-panel-header"
           style={{ textTransform: 'none', letterSpacing: 0, fontSize: '12px' }}
         >
-          <span style={{ fontSize: '13px', fontWeight: 500, color: 'var(--color-text-primary)' }}>
+          <span style={{ fontSize: '13px', fontWeight: 500, color: 'var(--ink)' }}>
             Add field
           </span>
           <button
@@ -2450,7 +2468,7 @@ function AddFieldModal({
             style={{
               fontSize: '16px',
               lineHeight: 1,
-              color: 'var(--color-text-tertiary)',
+              color: 'var(--ink-muted)',
               background: 'transparent',
               border: 'none',
               cursor: 'pointer',
@@ -2461,7 +2479,7 @@ function AddFieldModal({
           </button>
         </div>
 
-        <div className="px-3.5 py-3" style={{ borderBottom: '1px solid var(--color-border-tertiary)' }}>
+        <div className="px-3.5 py-3" style={{ borderBottom: '1px solid var(--hairline)' }}>
           <input
             type="search"
             autoFocus
@@ -2484,9 +2502,9 @@ function AddFieldModal({
                   className="ff-label"
                   style={{
                     padding: '8px 14px',
-                    background: 'var(--color-background-tertiary)',
-                    borderTop: '1px solid var(--color-border-tertiary)',
-                    borderBottom: '1px solid var(--color-border-tertiary)',
+                    background: 'var(--bg-surface)',
+                    borderTop: '1px solid var(--hairline)',
+                    borderBottom: '1px solid var(--hairline)',
                   }}
                 >
                   {category.title}
@@ -2499,12 +2517,12 @@ function AddFieldModal({
                       className="flex items-center justify-between gap-3"
                       style={{
                         padding: '8px 14px',
-                        borderBottom: '1px solid var(--color-border-tertiary)',
+                        borderBottom: '1px solid var(--hairline)',
                       }}
                     >
                       <code
                         className="ff-mono"
-                        style={{ fontSize: '11px', color: 'var(--color-text-primary)' }}
+                        style={{ fontSize: '11px', color: 'var(--ink)' }}
                       >
                         {field}
                       </code>
@@ -2513,7 +2531,7 @@ function AddFieldModal({
                           type="button"
                           onClick={() => onRemove(field)}
                           className="ff-btn-secondary"
-                          style={{ color: 'var(--color-badge-danger-text)' }}
+                          style={{ color: 'var(--accent-red)' }}
                         >
                           Remove
                         </button>
@@ -2536,7 +2554,7 @@ function AddFieldModal({
 
         <div
           className="px-3.5 py-3 flex justify-end"
-          style={{ borderTop: '1px solid var(--color-border-tertiary)' }}
+          style={{ borderTop: '1px solid var(--hairline)' }}
         >
           <button type="button" onClick={onClose} className="ff-btn-secondary">
             Close
@@ -2790,27 +2808,29 @@ function FieldPreviewSidebar({
       <aside
         className="fixed top-0 right-0 z-50 h-screen flex flex-col"
         style={{
-          width: '380px',
+          width: '50vw',
+          minWidth: '440px',
+          maxWidth: '100vw',
           background: '#ffffff',
-          borderLeft: '1px solid var(--color-border-tertiary)',
+          borderLeft: '1px solid var(--hairline)',
           boxShadow: '-2px 0 12px rgba(0,0,0,0.06)',
         }}
       >
         {/* Header */}
         <div
           className="px-3.5 py-3 flex items-start justify-between gap-2"
-          style={{ borderBottom: '1px solid var(--color-border-tertiary)' }}
+          style={{ borderBottom: '1px solid var(--hairline)' }}
         >
           <div className="min-w-0">
             <code
               className="ff-mono"
-              style={{ fontSize: '13px', fontWeight: 600, color: 'var(--color-text-primary)' }}
+              style={{ fontSize: '13px', fontWeight: 600, color: 'var(--ink)' }}
             >
               {displayField}
             </code>
             <p
               className="mt-0.5"
-              style={{ fontSize: '11px', color: 'var(--color-text-tertiary)' }}
+              style={{ fontSize: '11px', color: 'var(--ink-muted)' }}
             >
               {mappingLabel}
             </p>
@@ -2822,7 +2842,7 @@ function FieldPreviewSidebar({
             style={{
               fontSize: '18px',
               lineHeight: 1,
-              color: 'var(--color-text-tertiary)',
+              color: 'var(--ink-muted)',
               background: 'transparent',
               border: 'none',
               cursor: 'pointer',
@@ -2836,7 +2856,7 @@ function FieldPreviewSidebar({
         {/* Search + active filter chips + add-filter UI */}
         <div
           className="px-3.5 py-3 space-y-2"
-          style={{ borderBottom: '1px solid var(--color-border-tertiary)' }}
+          style={{ borderBottom: '1px solid var(--hairline)' }}
         >
           <input
             type="search"
@@ -2897,7 +2917,7 @@ function FieldPreviewSidebar({
               className="ff-panel"
               style={{
                 background: '#ffffff',
-                border: '1px solid var(--color-border-secondary)',
+                border: '1px solid var(--hairline)',
                 borderRadius: '6px',
                 maxHeight: '220px',
                 overflowY: 'auto',
@@ -2917,10 +2937,10 @@ function FieldPreviewSidebar({
                     background: 'transparent',
                     border: 'none',
                     cursor: 'pointer',
-                    color: 'var(--color-text-primary)',
+                    color: 'var(--ink)',
                   }}
                   onMouseEnter={(e) => {
-                    e.currentTarget.style.background = 'var(--color-background-secondary)'
+                    e.currentTarget.style.background = 'var(--bg-surface)'
                   }}
                   onMouseLeave={(e) => {
                     e.currentTarget.style.background = 'transparent'
@@ -2945,10 +2965,10 @@ function FieldPreviewSidebar({
         <div
           className="px-3.5 py-2"
           style={{
-            background: 'var(--color-background-tertiary)',
-            borderBottom: '1px solid var(--color-border-tertiary)',
+            background: 'var(--bg-surface)',
+            borderBottom: '1px solid var(--hairline)',
             fontSize: '11px',
-            color: 'var(--color-text-tertiary)',
+            color: 'var(--ink-muted)',
           }}
         >
           {loading && products.length === 0
@@ -2961,7 +2981,7 @@ function FieldPreviewSidebar({
           {products.length === 0 && !loading ? (
             <p
               className="px-3.5 py-6 text-center"
-              style={{ fontSize: '11px', color: 'var(--color-text-tertiary)' }}
+              style={{ fontSize: '11px', color: 'var(--ink-muted)' }}
             >
               No products match
             </p>
@@ -2974,19 +2994,19 @@ function FieldPreviewSidebar({
                 <div
                   key={p.id}
                   className="px-3.5 py-2.5 flex items-start gap-3"
-                  style={{ borderBottom: '1px solid var(--color-border-tertiary)' }}
+                  style={{ borderBottom: '1px solid var(--hairline)' }}
                 >
                   <div className="flex-1 min-w-0">
                     <p
                       className="truncate"
-                      style={{ fontSize: '12px', color: 'var(--color-text-primary)' }}
+                      style={{ fontSize: '12px', color: 'var(--ink)' }}
                       title={p.title}
                     >
                       {p.title || '—'}
                     </p>
                     <p
                       className="ff-mono mt-0.5 truncate"
-                      style={{ fontSize: '10px', color: 'var(--color-text-tertiary)' }}
+                      style={{ fontSize: '10px', color: 'var(--ink-muted)' }}
                     >
                       {p.handle}
                     </p>
@@ -2995,14 +3015,14 @@ function FieldPreviewSidebar({
                     className="ff-mono shrink-0 text-right"
                     style={{
                       fontSize: '11px',
-                      maxWidth: '160px',
-                      wordBreak: 'break-all',
+                      maxWidth: '360px',
+                      wordBreak: 'break-word',
                     }}
                   >
                     {value === '' ? (
                       <span
                         style={{
-                          color: 'var(--color-text-tertiary)',
+                          color: 'var(--ink-muted)',
                           fontStyle: 'italic',
                         }}
                       >
@@ -3011,7 +3031,7 @@ function FieldPreviewSidebar({
                     ) : value === '__AI__' ? (
                       <span className="ff-badge ff-badge-accent">AI</span>
                     ) : (
-                      <span style={{ color: 'var(--color-accent)' }}>{value}</span>
+                      <span style={{ color: 'var(--accent-purple)' }}>{value}</span>
                     )}
                   </div>
                 </div>
@@ -3023,7 +3043,7 @@ function FieldPreviewSidebar({
         {/* Pagination */}
         <div
           className="px-3.5 py-2.5 flex items-center justify-between gap-2"
-          style={{ borderTop: '1px solid var(--color-border-tertiary)' }}
+          style={{ borderTop: '1px solid var(--hairline)' }}
         >
           <button
             type="button"
@@ -3033,7 +3053,7 @@ function FieldPreviewSidebar({
           >
             Previous
           </button>
-          <span style={{ fontSize: '11px', color: 'var(--color-text-tertiary)' }}>
+          <span style={{ fontSize: '11px', color: 'var(--ink-muted)' }}>
             Page {page} of {totalPages}
           </span>
           <button
@@ -3071,8 +3091,8 @@ function FilterValueEditor({
     <div
       className="flex flex-wrap items-center gap-2 p-2"
       style={{
-        background: 'var(--color-background-tertiary)',
-        border: '1px solid var(--color-border-tertiary)',
+        background: 'var(--bg-surface)',
+        border: '1px solid var(--hairline)',
         borderRadius: '6px',
       }}
     >
@@ -3080,7 +3100,7 @@ function FilterValueEditor({
         style={{
           fontSize: '11px',
           fontWeight: 500,
-          color: 'var(--color-text-secondary)',
+          color: 'var(--ink-secondary)',
           flexShrink: 0,
         }}
       >
@@ -3499,13 +3519,17 @@ export default function MappingClient({
   return (
     <FeedModeContext.Provider value={feedMode}>
     <MetafieldLabelsContext.Provider value={metafieldLabels}>
-    <div className="min-h-screen">
-      <header className="ff-topbar">
-        <div className="flex items-center gap-3">
-          <h1 className="ff-topbar-title">{feedName} · Mapping</h1>
-          <span style={{ fontSize: '11px', color: 'var(--color-text-tertiary)' }}>
-            {mappedCount} of {totalVisibleFields} mapped
-          </span>
+    <div className="min-h-screen" style={{ background: 'var(--bg-base)' }}>
+      <main className="max-w-6xl mx-auto px-6 py-9 space-y-5">
+      <header className="flex items-start justify-between gap-4 flex-wrap">
+        <div className="space-y-1.5 min-w-0">
+          <div className="wl-eyebrow truncate">{feedName}</div>
+          <h1 style={{ fontSize: '30px', fontWeight: 500, letterSpacing: '-0.02em', lineHeight: 1.1, color: 'var(--ink)' }}>
+            Mapping
+          </h1>
+          <p style={{ fontSize: '13px', color: 'var(--ink-muted)' }}>
+            {mappedCount} of {totalVisibleFields} fields mapped
+          </p>
         </div>
         <div className="flex items-center gap-2 flex-wrap justify-end">
           <button onClick={openFieldsModal} className="ff-btn-secondary">
@@ -3516,7 +3540,7 @@ export default function MappingClient({
           </button>
 
           {aiError && (
-            <span className="max-w-40 truncate" style={{ fontSize: '11px', color: 'var(--color-badge-danger-text)' }}>{aiError}</span>
+            <span className="max-w-40 truncate" style={{ fontSize: '11px', color: 'var(--accent-red)' }}>{aiError}</span>
           )}
           <button onClick={fetchAISuggestions} disabled={isFetchingAI} className="ff-btn-secondary">
             {isFetchingAI ? (
@@ -3541,7 +3565,7 @@ export default function MappingClient({
             <div
               className="flex items-center gap-2 px-2 py-1"
               style={{
-                background: 'var(--color-badge-accent-bg)',
+                background: 'rgba(124, 92, 252, 0.13)',
                 borderRadius: '3px',
               }}
             >
@@ -3556,13 +3580,13 @@ export default function MappingClient({
               )}
               <span
                 className="max-w-40 truncate"
-                style={{ fontSize: '11px', fontWeight: 500, color: 'var(--color-badge-accent-text)' }}
+                style={{ fontSize: '11px', fontWeight: 500, color: '#5b3fd6' }}
               >
                 {previewProduct.title}
               </span>
               <button
                 onClick={() => setPreviewProduct(null)}
-                style={{ color: 'var(--color-badge-accent-text)', fontSize: '14px', lineHeight: 1 }}
+                style={{ color: '#5b3fd6', fontSize: '14px', lineHeight: 1 }}
                 aria-label="Remove preview product"
               >
                 ×
@@ -3579,12 +3603,12 @@ export default function MappingClient({
           )}
 
           {status === 'saved' && (
-            <span style={{ fontSize: '11px', fontWeight: 500, color: 'var(--color-badge-success-text)' }}>
+            <span style={{ fontSize: '11px', fontWeight: 500, color: 'var(--accent-green)' }}>
               Saved
             </span>
           )}
           {status === 'error' && (
-            <span style={{ fontSize: '11px', color: 'var(--color-badge-danger-text)' }}>{errorMsg}</span>
+            <span style={{ fontSize: '11px', color: 'var(--accent-red)' }}>{errorMsg}</span>
           )}
           <button onClick={handleSave} disabled={isPending} className="ff-btn-primary">
             {isPending ? 'Saving…' : 'Save'}
@@ -3592,7 +3616,6 @@ export default function MappingClient({
         </div>
       </header>
 
-      <main className="px-4 py-4 max-w-6xl space-y-3">
         {/* Required — always visible, never collapsed */}
         <SectionPanel
           title="Required"

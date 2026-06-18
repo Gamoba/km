@@ -57,14 +57,14 @@ function RowImage({ url, alt }: { url: string | null; alt: string }) {
         alt={alt}
         loading="lazy"
         className="object-cover shrink-0"
-        style={{ width: ROW_IMG, height: ROW_IMG, borderRadius: '6px', border: '1px solid var(--color-border-tertiary)' }}
+        style={{ width: ROW_IMG, height: ROW_IMG, borderRadius: '6px', border: '1px solid var(--hairline)' }}
       />
     )
   }
   return (
     <div
       className="shrink-0"
-      style={{ width: ROW_IMG, height: ROW_IMG, background: 'var(--color-background-secondary)', borderRadius: '6px' }}
+      style={{ width: ROW_IMG, height: ROW_IMG, background: 'var(--bg-surface)', borderRadius: '6px' }}
     />
   )
 }
@@ -74,7 +74,7 @@ function ChevronIcon({ open }: { open: boolean }) {
   return (
     <svg
       className={`w-3.5 h-3.5 shrink-0 transition-transform ${open ? 'rotate-180' : ''}`}
-      style={{ color: 'var(--color-text-tertiary)' }}
+      style={{ color: 'var(--ink-muted)' }}
       fill="none"
       viewBox="0 0 24 24"
       stroke="currentColor"
@@ -88,7 +88,7 @@ function ChevronIcon({ open }: { open: boolean }) {
 // Expanded-detail helpers — same visual language as the Products tab's detail.
 function SectionHeader({ children }: { children: React.ReactNode }) {
   return (
-    <h4 className="ff-label" style={{ marginBottom: '6px', fontWeight: 600, color: 'var(--color-text-primary)' }}>
+    <h4 className="ff-label" style={{ marginBottom: '6px', fontWeight: 600, color: 'var(--ink)' }}>
       {children}
     </h4>
   )
@@ -96,8 +96,8 @@ function SectionHeader({ children }: { children: React.ReactNode }) {
 function InfoRow({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div className="flex gap-3 items-start">
-      <span style={{ fontSize: '11px', color: 'var(--color-text-tertiary)', width: '130px', flexShrink: 0 }}>{label}</span>
-      <span style={{ fontSize: '11px', color: 'var(--color-text-primary)', flex: 1, minWidth: 0 }} className="break-words">
+      <span style={{ fontSize: '11px', color: 'var(--ink-muted)', width: '130px', flexShrink: 0 }}>{label}</span>
+      <span style={{ fontSize: '11px', color: 'var(--ink)', flex: 1, minWidth: 0 }} className="break-words">
         {children}
       </span>
     </div>
@@ -193,15 +193,15 @@ export function BucketResultsPanel({
   )
   const shown = filter === 'all' ? items : items.filter((i) => i.status === filter)
 
-  if (loading) return <p style={{ fontSize: '11px', color: 'var(--color-text-tertiary)' }}>Loading results…</p>
+  if (loading) return <p style={{ fontSize: '11px', color: 'var(--ink-muted)' }}>Loading results…</p>
 
   return (
     <div className="space-y-2.5">
       <div className="flex items-center justify-between flex-wrap gap-2">
-        <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--color-text-primary)' }}>
-          Results — {items.length} {items.length === 1 ? 'product' : 'products'}
+        <span style={{ fontSize: '16px', fontWeight: 500, color: 'var(--ink)' }}>
+          Results <span style={{ color: 'var(--ink-muted)', fontWeight: 400 }}>· {items.length} {items.length === 1 ? 'product' : 'products'}</span>
         </span>
-        {error && <span style={{ fontSize: '11px', color: 'var(--color-badge-danger-text)' }}>{error}</span>}
+        {error && <span style={{ fontSize: '11px', color: 'var(--accent-red)' }}>{error}</span>}
       </div>
 
         {/* Status filter */}
@@ -218,9 +218,9 @@ export function BucketResultsPanel({
                   padding: '3px 10px',
                   fontSize: '11px',
                   borderRadius: '5px',
-                  border: '1px solid var(--color-border-tertiary)',
-                  background: active ? 'var(--color-accent)' : 'transparent',
-                  color: active ? '#ffffff' : 'var(--color-text-secondary)',
+                  border: '1px solid var(--hairline)',
+                  background: active ? 'var(--accent-purple)' : 'transparent',
+                  color: active ? '#ffffff' : 'var(--ink-secondary)',
                 }}
               >
                 {f.label} {n > 0 && <span style={{ opacity: 0.7 }}>({n})</span>}
@@ -230,7 +230,7 @@ export function BucketResultsPanel({
         </div>
 
         {shown.length === 0 ? (
-          <p style={{ fontSize: '11px', color: 'var(--color-text-tertiary)' }}>No products in this view.</p>
+          <p style={{ fontSize: '11px', color: 'var(--ink-muted)' }}>No products in this view.</p>
         ) : (
           <div className="space-y-1.5">
             {shown.map((it) => {
@@ -247,7 +247,7 @@ export function BucketResultsPanel({
                   {/* Row header — same card layout as the Products tab */}
                   <div
                     className="flex items-start gap-3 px-3.5 py-2"
-                    style={{ background: isOpen ? 'var(--color-background-secondary)' : 'transparent' }}
+                    style={{ background: isOpen ? 'var(--bg-surface)' : 'transparent' }}
                   >
                     <RowImage url={it.image_url} alt={it.original_title} />
 
@@ -273,7 +273,7 @@ export function BucketResultsPanel({
                               onClick={() => saveTitle(it.product_ref, draft)}
                               disabled={rowBusy || !draft.trim()}
                               className="ff-btn-ghost shrink-0 w-6 h-6 flex items-center justify-center"
-                              style={{ color: 'var(--color-badge-success-text, var(--color-accent))' }}
+                              style={{ color: 'var(--accent-green, var(--accent-purple))' }}
                               aria-label="Save title"
                               title="Save"
                             >
@@ -284,7 +284,7 @@ export function BucketResultsPanel({
                               onClick={() => setDrafts((p) => ({ ...p, [it.product_ref]: baseline }))}
                               disabled={rowBusy}
                               className="ff-btn-ghost shrink-0 w-6 h-6 flex items-center justify-center"
-                              style={{ color: 'var(--color-text-tertiary)' }}
+                              style={{ color: 'var(--ink-muted)' }}
                               aria-label="Cancel edit"
                               title="Cancel"
                             >
@@ -295,13 +295,13 @@ export function BucketResultsPanel({
                       </div>
 
                       {/* Original title (read-only) */}
-                      <div className="truncate" style={{ fontSize: '10px', color: 'var(--color-text-tertiary)' }}>
+                      <div className="truncate" style={{ fontSize: '10px', color: 'var(--ink-muted)' }}>
                         Original: {it.original_title || '—'}
                       </div>
 
                       {/* needs_review: why it failed */}
                       {it.status === 'needs_review' && it.validation_issues.length > 0 && (
-                        <div style={{ fontSize: '10px', color: 'var(--color-badge-warning-text)' }}>
+                        <div style={{ fontSize: '10px', color: 'var(--accent-amber)' }}>
                           {it.validation_issues.map((iss, idx) => (
                             <div key={idx}>• {iss.detail}</div>
                           ))}
@@ -327,7 +327,7 @@ export function BucketResultsPanel({
                             onClick={() => reject(it.product_ref)}
                             disabled={rowBusy}
                             className="ff-btn-ghost"
-                            style={{ fontSize: '11px', padding: '0 8px', color: 'var(--color-badge-danger-text)' }}
+                            style={{ fontSize: '11px', padding: '0 8px', color: 'var(--accent-red)' }}
                             title="Revert to the original Shopify title"
                           >
                             Reject
@@ -351,9 +351,9 @@ export function BucketResultsPanel({
 
                   {/* Expandable detail — same fold-out pattern as the Products tab */}
                   {isOpen && (
-                    <div className="px-3.5 py-3 space-y-4" style={{ borderTop: '1px solid var(--color-border-tertiary)' }}>
+                    <div className="px-3.5 py-3 space-y-4" style={{ borderTop: '1px solid var(--hairline)' }}>
                       {detail === 'loading' || detail === undefined ? (
-                        <p style={{ fontSize: '11px', color: 'var(--color-text-tertiary)' }}>Loading product data…</p>
+                        <p style={{ fontSize: '11px', color: 'var(--ink-muted)' }}>Loading product data…</p>
                       ) : (
                         <>
                           <section>
@@ -366,7 +366,7 @@ export function BucketResultsPanel({
                               <InfoRow label="New title">{it.new_title || '—'}</InfoRow>
                               {detail.validation_issues.length > 0 && (
                                 <InfoRow label="Validation">
-                                  <span style={{ color: 'var(--color-badge-warning-text)' }}>
+                                  <span style={{ color: 'var(--accent-amber)' }}>
                                     {detail.validation_issues.map((iss) => iss.detail).join('; ')}
                                   </span>
                                 </InfoRow>
@@ -377,7 +377,7 @@ export function BucketResultsPanel({
                           <section>
                             <SectionHeader>Product data</SectionHeader>
                             {detail.fields.length === 0 ? (
-                              <span style={{ fontSize: '11px', color: 'var(--color-text-tertiary)' }}>
+                              <span style={{ fontSize: '11px', color: 'var(--ink-muted)' }}>
                                 No structured fields on this product.
                               </span>
                             ) : (

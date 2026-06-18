@@ -566,20 +566,6 @@ export async function runBucketRefs(
   }
 }
 
-export async function previewBucket(
-  feedId: string,
-  bucketId: string,
-  limit: number
-): Promise<{ data: OptimizationOutcome[] } | { error: string }> {
-  const g = await requireOwnedBucket(feedId, bucketId)
-  if ('error' in g) return g
-  try {
-    await enforceRateLimit(g.userId, 'workshop_generate')
-    return { data: await buckets.previewBucket(feedId, bucketId, limit) }
-  } catch (e) {
-    return { error: clientMessage(e, 'previewBucket') }
-  }
-}
 
 // ── Custom labels (split-testing) ────────────────────────────────────────────
 

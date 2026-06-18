@@ -1,9 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { planBucketRun, previewBucket, runBucketRefs } from './actions'
-import { OutcomeList } from './OutcomeList'
-import type { OptimizationOutcome } from '@/lib/titleOptimizer'
+import { planBucketRun, runBucketRefs } from './actions'
 import type { OverlapSummary } from '@/lib/titleOptimizationScope'
 
 const CHUNK = 10
@@ -21,10 +19,6 @@ export function BucketRunTab({
 
   const [summary, setSummary] = useState<OverlapSummary | null>(null)
   const [loadingSummary, setLoadingSummary] = useState(true)
-
-  const [previewSize, setPreviewSize] = useState('10')
-  const [previewing, setPreviewing] = useState(false)
-  const [previewResults, setPreviewResults] = useState<OptimizationOutcome[]>([])
 
   const [rerun, setRerun] = useState(false)
   const [includeHumanEdited, setIncludeHumanEdited] = useState(false)
@@ -48,17 +42,6 @@ export function BucketRunTab({
   async function refreshSummary() {
     const r = await planBucketRun(feedId, bucketId, { rerun: false, includeHumanEdited: false })
     if ('data' in r) setSummary(r.data.summary)
-  }
-
-  async function handlePreview() {
-    setError(null)
-    setPreviewing(true)
-    setPreviewResults([])
-    const n = parseInt(previewSize, 10) || 10
-    const r = await previewBucket(feedId, bucketId, n)
-    if ('data' in r) setPreviewResults(r.data)
-    else setError(r.error)
-    setPreviewing(false)
   }
 
   async function handleRun() {
@@ -96,84 +79,108 @@ export function BucketRunTab({
   const noMembers = !loadingSummary && summary !== null && summary.inScope === 0
 
   return (
-    <div className="space-y-3">
-      {error && <div style={{ fontSize: '11px', color: 'var(--color-badge-danger-text)' }}>{error}</div>}
+    <div className="space-y-5">
+      {error && (
+        <div
+          className="flex items-start gap-2.5"
+          style={{ padding: '10px 12px', border: '1px solid var(--hairline)', borderRadius: '10px' }}
+        >
+          <span className="wl-dot shrink-0" style={{ background: 'var(--accent-red)', marginTop: '5px' }} />
+          <p style={{ fontSize: '12px', color: 'var(--ink-secondary)' }}>{error}</p>
+        </div>
+      )}
 
       {noMembers && (
-        <p style={{ fontSize: '11px', color: 'var(--color-text-tertiary)' }}>
-          This bucket has no products yet. Set its scope first (Scope tab).
+        <p style={{ fontSize: '13px', color: 'var(--ink-muted)' }}>
+          This bucket has no products yet. Set its scope first on the Scope tab.
         </p>
       )}
 
-      {/* Preview */}
-      <div className="ff-panel">
-        <div className="ff-panel-header" style={{ textTransform: 'none', letterSpacing: 0, fontSize: '12px', padding: '10px 14px' }}>
-          Preview — experiment without saving
-        </div>
-        <div className="p-3.5 space-y-2">
-          <p style={{ fontSize: '11px', color: 'var(--color-text-tertiary)' }}>
-            Generate titles for a sample of this bucket&apos;s products. Nothing is saved.
+      {/* Hero — the run is the single clear action */}
+      <div className="flex items-start justify-between gap-4 flex-wrap">
+        <div className="space-y-1.5">
+          <h2 style={{ fontSize: '26px', fontWeight: 500, letterSpacing: '-0.02em', lineHeight: 1.1, color: 'var(--ink)' }}>
+            Run optimization
+          </h2>
+          <p style={{ fontSize: '13px', color: 'var(--ink-muted)' }}>
+            Generate and save AI titles for this bucket&apos;s products.
           </p>
-          <div className="flex items-center gap-2">
-            <label className="ff-label" style={{ margin: 0 }}>Sample size</label>
-            <input type="number" min={1} max={50} value={previewSize} onChange={(e) => setPreviewSize(e.target.value)} className="ff-input w-20" />
-            <button onClick={handlePreview} disabled={previewing || noMembers} className="ff-btn-secondary">
-              {previewing ? 'Generating…' : 'Preview'}
-            </button>
-          </div>
         </div>
+        <button
+          onClick={handleRun}
+          disabled={running || loadingSummary || noMembers}
+          className="wl-btn-primary"
+          style={{ fontSize: '14px', padding: '9px 18px' }}
+        >
+          {running ? 'Running…' : 'Run optimization'}
+        </button>
       </div>
 
-      <OutcomeList title="Preview results" outcomes={previewResults} />
-
-      {/* Run */}
-      <div className="ff-panel">
-        <div className="ff-panel-header" style={{ textTransform: 'none', letterSpacing: 0, fontSize: '12px', padding: '10px 14px' }}>
-          Run &amp; save
-        </div>
-        <div className="p-3.5 space-y-3">
-          {loadingSummary ? (
-            <p style={{ fontSize: '11px', color: 'var(--color-text-tertiary)' }}>Loading…</p>
-          ) : summary ? (
-            <p style={{ fontSize: '11px', color: 'var(--color-text-secondary)' }}>
-              <strong>{summary.inScope}</strong> products in this bucket.{' '}
-              <strong>{summary.alreadyOptimized}</strong> already AI-optimized
-              {summary.humanEdited > 0 ? <> (<strong>{summary.humanEdited}</strong> hand-edited)</> : null}
-              {summary.needsReview > 0 ? <>, {summary.needsReview} awaiting review</> : null}.{' '}
-              <strong>{summary.notYetOptimized}</strong> not yet optimized.
-            </p>
-          ) : null}
-
-          <div className="space-y-1.5">
-            <label className="flex items-center gap-2" style={{ fontSize: '11px', color: 'var(--color-text-secondary)' }}>
-              <input type="checkbox" checked={rerun} onChange={(e) => setRerun(e.target.checked)} />
-              Re-optimize products that already have an AI title
-            </label>
-            <label
-              className="flex items-center gap-2"
-              style={{ fontSize: '11px', color: rerun ? 'var(--color-text-secondary)' : 'var(--color-text-tertiary)', paddingLeft: '20px' }}
-            >
-              <input type="checkbox" checked={includeHumanEdited} disabled={!rerun} onChange={(e) => setIncludeHumanEdited(e.target.checked)} />
-              Also overwrite hand-edited titles{summary && summary.humanEdited > 0 ? ` (${summary.humanEdited})` : ''} — destructive
-            </label>
+      {/* Numbers as context */}
+      {loadingSummary ? (
+        <p style={{ fontSize: '13px', color: 'var(--ink-muted)' }}>Loading…</p>
+      ) : summary ? (
+        <div className="wl-card" style={{ overflow: 'hidden' }}>
+          <div className="grid grid-cols-3">
+            <Stat first label="In bucket" value={summary.inScope} />
+            <Stat label="Optimized" value={summary.alreadyOptimized} />
+            <Stat label="Not yet" value={summary.notYetOptimized} />
           </div>
-
-          {running && (
-            <div className="space-y-1">
-              <div style={{ fontSize: '11px', color: 'var(--color-text-secondary)' }}>
-                {progress.done} of {progress.total} optimized…
-              </div>
-              <div style={{ height: '4px', background: 'var(--color-border-tertiary)', borderRadius: '2px', overflow: 'hidden' }}>
-                <div style={{ height: '100%', width: progress.total ? `${(progress.done / progress.total) * 100}%` : '0%', background: 'var(--color-accent)', transition: 'width 0.2s' }} />
-              </div>
+          {(summary.humanEdited > 0 || summary.needsReview > 0) && (
+            <div
+              className="flex flex-wrap gap-x-6 gap-y-1"
+              style={{ padding: '12px 18px', borderTop: '1px solid var(--hairline)', fontSize: '12px', color: 'var(--ink-muted)' }}
+            >
+              {summary.humanEdited > 0 && <span>{summary.humanEdited} hand-edited</span>}
+              {summary.needsReview > 0 && <span>{summary.needsReview} awaiting review</span>}
             </div>
           )}
+        </div>
+      ) : null}
 
-          <button onClick={handleRun} disabled={running || loadingSummary || noMembers} className="ff-btn-primary">
-            {running ? 'Running…' : 'Run optimization'}
-          </button>
+      {/* Progress while running */}
+      {running && (
+        <div className="space-y-1.5">
+          <div style={{ fontSize: '12px', color: 'var(--ink-secondary)' }}>
+            {progress.done} of {progress.total} optimized…
+          </div>
+          <div style={{ height: '6px', background: 'var(--bg-surface)', border: '1px solid var(--hairline)', borderRadius: '999px', overflow: 'hidden' }}>
+            <div style={{ height: '100%', width: progress.total ? `${(progress.done / progress.total) * 100}%` : '0%', background: 'var(--accent-purple)', transition: 'width 0.2s' }} />
+          </div>
+        </div>
+      )}
+
+      {/* Options */}
+      <div className="wl-card" style={{ padding: '16px' }}>
+        <div className="wl-eyebrow" style={{ marginBottom: '12px' }}>Options</div>
+        <div className="space-y-3">
+          <label className="flex items-center gap-2.5" style={{ fontSize: '13px', color: 'var(--ink-secondary)' }}>
+            <input type="checkbox" checked={rerun} onChange={(e) => setRerun(e.target.checked)} />
+            Re-optimize products that already have an AI title
+          </label>
+          <label
+            className="flex items-center gap-2.5"
+            style={{ fontSize: '13px', color: rerun ? 'var(--ink-secondary)' : 'var(--ink-muted)', paddingLeft: '22px' }}
+          >
+            <input type="checkbox" checked={includeHumanEdited} disabled={!rerun} onChange={(e) => setIncludeHumanEdited(e.target.checked)} />
+            Also overwrite hand-edited titles{summary && summary.humanEdited > 0 ? ` (${summary.humanEdited})` : ''} — destructive
+          </label>
         </div>
       </div>
+    </div>
+  )
+}
+
+function Stat({ label, value, first }: { label: string; value: number; first?: boolean }) {
+  return (
+    <div style={{ padding: '16px 18px', borderLeft: first ? 'none' : '1px solid var(--hairline)' }}>
+      <p className="wl-eyebrow">{label}</p>
+      <p
+        className="mt-2"
+        style={{ fontSize: '26px', fontWeight: 500, letterSpacing: '-0.02em', lineHeight: 1.05, color: 'var(--ink)' }}
+      >
+        {value}
+      </p>
     </div>
   )
 }
