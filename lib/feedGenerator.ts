@@ -287,6 +287,9 @@ export async function countFilteredProducts(
     feedId,
     (shopSettingsData?.market_url as string | null) ?? null
   )
+  // Hydrate here too: a filter rule on ai_optimized_title must count the same
+  // number of products as the generator actually emits.
+  await attachOptimizedTitles(db, feedId, rawProducts)
   const filterRows = (filtersData ?? []) as FeedFilter[]
   const filtered = applyFeedFilters(rawProducts, filterRows, marketUrl)
 
@@ -326,11 +329,19 @@ async function fetchAllActiveProducts(
   return out
 }
 
-// True if any mapping draws on the AI-optimized title source (as a FIELD, a
-// COMBINE block value, a PREFIX_SUFFIX field, an onlyIf condition, etc.).
-// JSON-scanning the config catches every shape without enumerating them.
-function mappingsUseAiTitle(mappings: FeedMapping[]): boolean {
-  return mappings.some((m) => JSON.stringify(m.config).includes('ai_optimized_title'))
+// The AI-optimized title accepted for this feed, or null.
+//
+// An accepted title OVERRIDES the title field no matter how it is mapped — the
+// mapping still runs for every other field, but whatever it produced for `title`
+// is discarded in favour of this. Optimizing a product is therefore the decision
+// to publish that title; there is no separate opt-in on the mapping.
+//
+// Only ai_generated / human_edited rows carry a value. Proposals still sitting
+// in needs_review have optimized_title = NULL, enforced by a CHECK constraint
+// (migration 021), so an unreviewed title cannot reach the feed through here.
+function aiTitleFor(product: SupabaseProduct): string | null {
+  const t = (product as Record<string, unknown>).optimized_title
+  return typeof t === 'string' && t.trim() !== '' ? t : null
 }
 
 // Loads product_ref → optimized_title for the feed (only rows that have an
@@ -470,9 +481,11 @@ export async function generateFeed(feedId: string): Promise<FeedResult> {
 
   const filterRows = (filtersData ?? []) as FeedFilter[]
 
-  // If any mapping uses the AI-optimized title source, hydrate optimized_title
-  // onto the products before resolving fields.
-  if (mappingsUseAiTitle(mappings)) await attachOptimizedTitles(db, feedId, rawProducts)
+  // Hydrate optimized_title onto every product before fields are resolved. Done
+  // unconditionally — an accepted AI title overrides the title field regardless
+  // of how it is mapped, so we can't tell from the mappings whether it's needed.
+  // Costs one indexed query that returns nothing on feeds with no optimizations.
+  await attachOptimizedTitles(db, feedId, rawProducts)
 
   // Per-bucket custom labels (split-testing). A product's bucket label is emitted
   // as <g:custom_label_N> UNLESS a feed mapping already covers that N (mapping
@@ -509,7 +522,10 @@ export async function generateFeed(feedId: string): Promise<FeedResult> {
 
       for (const mapping of mappings) {
         if (mapping.google_field === 'id' || mapping.google_field === 'item_group_id') continue
-        const value = await resolvedValue(mapping, product, anthropic, marketUrl)
+        // An accepted AI title wins over the title mapping. Short-circuits the
+        // mapping entirely, so an AI-type title mapping costs no API call.
+        const aiTitle = mapping.google_field === 'title' ? aiTitleFor(product) : null
+        const value = aiTitle ?? (await resolvedValue(mapping, product, anthropic, marketUrl))
         if (value !== '') lines.push(xmlLine(mapping.google_field, value))
       }
 
@@ -537,7 +553,10 @@ export async function generateFeed(feedId: string): Promise<FeedResult> {
 
         for (const mapping of mappings) {
           if (mapping.google_field === 'id' || mapping.google_field === 'item_group_id') continue
-          const value = await resolvedValue(mapping, vProduct, anthropic, marketUrl)
+          // Same override as product mode. The AI title is product-level, so
+          // every variant of the product carries it.
+          const aiTitle = mapping.google_field === 'title' ? aiTitleFor(product) : null
+          const value = aiTitle ?? (await resolvedValue(mapping, vProduct, anthropic, marketUrl))
           if (value !== '') {
             mappedLines.push(xmlLine(mapping.google_field, value))
             addedFields.add(mapping.google_field)
@@ -554,11 +573,15 @@ export async function generateFeed(feedId: string): Promise<FeedResult> {
           xmlLine('item_group_id', product.shopify_id),
         ]
 
-        // Auto-fill title if not covered by a mapping
+        // Auto-fill title if not covered by a mapping. The AI title stands in for
+        // the product title here rather than replacing the whole string — it's a
+        // product-level title, and dropping the variant suffix would give every
+        // variant in the group the same title.
         if (!mappedFields.has('title') || !addedFields.has('title')) {
           const suffix =
             variant.title && variant.title !== 'Default Title' ? ` - ${variant.title}` : ''
-          const autoTitle = `${product.title ?? ''}${suffix}`.trim()
+          const base = aiTitleFor(product) ?? product.title ?? ''
+          const autoTitle = `${base}${suffix}`.trim()
           if (autoTitle) autoLines.push(xmlLine('title', autoTitle))
         }
 
@@ -638,7 +661,7 @@ export async function generatePreview(feedId: string, limit = 100): Promise<Prev
   const rawProducts = (productsData ?? []) as SupabaseProduct[]
   const filterRows = (filtersData ?? []) as FeedFilter[]
 
-  if (mappingsUseAiTitle(mappings)) await attachOptimizedTitles(db, feedId, rawProducts)
+  await attachOptimizedTitles(db, feedId, rawProducts)
   const filteredProducts = applyFeedFilters(rawProducts, filterRows, marketUrl)
 
   let googleFields: string[]
@@ -650,6 +673,14 @@ export async function generatePreview(feedId: string, limit = 100): Promise<Prev
     for (const product of filteredProducts.slice(0, limit)) {
       const fields: Record<string, string> = {}
       for (const mapping of mappings) {
+        // Mirror the generator's AI-title override, ahead of the '__AI__'
+        // placeholder — otherwise a preview of an AI-mapped title would show a
+        // placeholder where the feed emits a real optimized title.
+        const aiTitle = mapping.google_field === 'title' ? aiTitleFor(product) : null
+        if (aiTitle) {
+          fields[mapping.google_field] = aiTitle
+          continue
+        }
         if (mapping.mapping_type === 'AI') {
           fields[mapping.google_field] = '__AI__'
           continue
@@ -675,11 +706,16 @@ export async function generatePreview(feedId: string, limit = 100): Promise<Prev
         fields['id'] = `${product.shopify_id}_${variant.id}`
         fields['item_group_id'] = product.shopify_id
         const suffix = variant.title && variant.title !== 'Default Title' ? ` - ${variant.title}` : ''
-        fields['title'] = `${product.title ?? ''}${suffix}`.trim()
+        fields['title'] = `${aiTitleFor(product) ?? product.title ?? ''}${suffix}`.trim()
         fields['availability'] = (variant.inventory_quantity ?? 0) > 0 ? 'in_stock' : 'out_of_stock'
 
         for (const mapping of mappings) {
           if (['id', 'item_group_id'].includes(mapping.google_field)) continue
+          const aiTitle = mapping.google_field === 'title' ? aiTitleFor(product) : null
+          if (aiTitle) {
+            fields[mapping.google_field] = aiTitle
+            continue
+          }
           if (mapping.mapping_type === 'AI') {
             fields[mapping.google_field] = '__AI__'
             continue
