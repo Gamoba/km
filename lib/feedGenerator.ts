@@ -59,6 +59,38 @@ function adminClient() {
   )
 }
 
+// Base URL that product links are built on, for one feed.
+//
+// First choice is the selected market's rootUrl (shop_settings.market_url) — it
+// carries the right locale subfolder/subdomain. Markets without a Shopify
+// Markets web presence have none, so we fall back to the owning project's own
+// storefront domain (projects.primary_domain, migration 030). Returns null when
+// neither is known, and resolveField('url') then yields an empty link rather
+// than a link to some other merchant's shop.
+async function resolveFeedBaseUrl(
+  db: ReturnType<typeof adminClient>,
+  feedId: string,
+  marketUrl: string | null
+): Promise<string | null> {
+  if (marketUrl) return marketUrl
+
+  const { data: feed } = await db
+    .from('feeds')
+    .select('project_id')
+    .eq('id', feedId)
+    .maybeSingle()
+  if (!feed?.project_id) return null
+
+  const { data: project } = await db
+    .from('projects')
+    .select('primary_domain')
+    .eq('id', feed.project_id)
+    .maybeSingle()
+
+  const domain = (project?.primary_domain as string | null) ?? null
+  return domain?.trim() ? domain.trim() : null
+}
+
 function xmlEscape(str: string): string {
   return str
     .replace(/&/g, '&amp;')
@@ -250,7 +282,11 @@ export async function countFilteredProducts(
     db.from('feed_filters').select('filter_type, operator, rules').eq('feed_id', feedId),
   ])
 
-  const marketUrl = (shopSettingsData?.market_url as string | null) ?? null
+  const marketUrl = await resolveFeedBaseUrl(
+    db,
+    feedId,
+    (shopSettingsData?.market_url as string | null) ?? null
+  )
   const filterRows = (filtersData ?? []) as FeedFilter[]
   const filtered = applyFeedFilters(rawProducts, filterRows, marketUrl)
 
@@ -422,7 +458,11 @@ export async function generateFeed(feedId: string): Promise<FeedResult> {
   if (mappingsErr) throw new Error(`Mappings failed: ${mappingsErr.message}`)
 
   const feedMode = (settingsData?.feed_mode as 'product' | 'variant') ?? 'product'
-  const marketUrl = (shopSettingsData?.market_url as string | null) ?? null
+  const marketUrl = await resolveFeedBaseUrl(
+    db,
+    feedId,
+    (shopSettingsData?.market_url as string | null) ?? null
+  )
 
   const mappings = ((mappingsData ?? []) as FeedMapping[]).filter(
     (m) => m.mapping_type && m.mapping_type !== ('' as MappingType)
@@ -587,7 +627,11 @@ export async function generatePreview(feedId: string, limit = 100): Promise<Prev
   ])
 
   const feedMode = (settingsData?.feed_mode as 'product' | 'variant') ?? 'product'
-  const marketUrl = (shopSettingsData?.market_url as string | null) ?? null
+  const marketUrl = await resolveFeedBaseUrl(
+    db,
+    feedId,
+    (shopSettingsData?.market_url as string | null) ?? null
+  )
   const mappings = ((mappingsData ?? []) as FeedMapping[]).filter(
     (m) => m.mapping_type && m.mapping_type !== ('' as MappingType)
   )

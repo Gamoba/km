@@ -30,13 +30,15 @@ export type FeedFilter = {
 // Builds a product URL using the selected market's rootUrl when available.
 // `marketUrl` may be a subdomain (https://shop.fr) or a subfolder (https://shop.com/fr) —
 // in both cases we strip a trailing slash and append /products/<handle>.
+//
+// There is deliberately NO env fallback here. SHOP_DOMAIN used to fill in when
+// marketUrl was null, which meant a project whose market has no web presence
+// emitted links to whatever single store that env var named — the wrong shop
+// entirely. Callers resolve the base URL per feed (market URL, else the
+// project's own primary_domain) and pass it in; no base means no link.
 function buildProductUrl(handle: string | null | undefined, marketUrl: string | null): string {
-  if (!handle) return ''
-  if (marketUrl) {
-    return `${marketUrl.replace(/\/+$/, '')}/products/${handle}`
-  }
-  const domain = process.env.SHOP_DOMAIN ?? process.env.SHOPIFY_SHOP_URL ?? ''
-  return domain ? `https://${domain}/products/${handle}` : ''
+  if (!handle || !marketUrl) return ''
+  return `${marketUrl.replace(/\/+$/, '')}/products/${handle}`
 }
 
 export function resolveField(

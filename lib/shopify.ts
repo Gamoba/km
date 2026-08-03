@@ -1,4 +1,8 @@
-export const API_VERSION = '2025-07'
+// Pin to a version Shopify still supports. 2025-07 has been retired: requests
+// against it are answered by 2025-10 anyway (verified via the served
+// X-Shopify-Api-Version header), so the old value only hid which schema we were
+// actually talking to. Bumping is a no-op at runtime and makes the pin honest.
+export const API_VERSION = '2025-10'
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
@@ -126,8 +130,10 @@ export type ShopifyMarket = {
   handle: string
   status: 'ACTIVE' | 'DRAFT'
   type: string           // 'PRIMARY' | 'SECONDARY' etc.
-  currency: string       // ISO 4217 e.g. "DKK"
-  currencyName: string
+  currency: string       // ISO 4217 e.g. "DKK" — falls back to the shop currency
+  // Only present when the market has explicit currency settings; null on stores
+  // that inherit the shop currency, so render it conditionally.
+  currencyName: string | null
   defaultLocale: ShopifyMarketLocale | null
   alternateLocales: ShopifyMarketLocale[]
   marketUrl: string | null
@@ -183,7 +189,19 @@ type ShopLocaleGql = { locale: string; name: string; primary: boolean }
 
 // As of Admin API 2025-04+, MarketWebPresence.rootUrl was replaced with rootUrls
 // (a list of { locale, url } so each locale can have its own URL).
+//
+// The shop-level fields are FALLBACKS, not decoration. A market only carries its
+// own currencySettings / webPresences when the merchant has configured Markets
+// explicitly. On a single-market store (the common case) Shopify returns
+// `currencySettings: null` and `webPresences: { nodes: [] }` — the market simply
+// inherits the shop's currency, locales and domain. Without these fallbacks such
+// a store yields no currency at all, and product URLs have no domain to build on.
 const MARKETS_QUERY = `{
+  shop {
+    currencyCode
+    primaryDomain { url }
+  }
+  shopLocales(published: true) { locale name primary }
   markets(first: 50) {
     nodes {
       id
@@ -685,7 +703,12 @@ export function createShopifyClient({ shopUrl, accessToken }: ShopifyCredentials
     }
 
     let json: {
-      data?: { markets?: { nodes?: unknown[]; userErrors?: unknown[] }; userErrors?: unknown[] }
+      data?: {
+        shop?: { currencyCode?: string | null; primaryDomain?: { url?: string | null } | null } | null
+        shopLocales?: ShopLocaleGql[] | null
+        markets?: { nodes?: unknown[]; userErrors?: unknown[] }
+        userErrors?: unknown[]
+      }
       errors?: Array<{ message?: string; extensions?: unknown }>
       extensions?: unknown
     }
@@ -720,41 +743,60 @@ export function createShopifyClient({ shopUrl, accessToken }: ShopifyCredentials
       handle: string
       status: string
       type: string
-      currencySettings: { baseCurrency: { currencyCode: string; currencyName: string } }
+      // Null on stores that never configured per-market currency — the market
+      // then runs on the shop's own currency.
+      currencySettings: { baseCurrency: { currencyCode: string; currencyName: string } } | null
       webPresences: {
         nodes: Array<{
           rootUrls: RawRootUrl[]
-          defaultLocale: ShopLocaleGql
-          alternateLocales: ShopLocaleGql[]
+          defaultLocale: ShopLocaleGql | null
+          alternateLocales: ShopLocaleGql[] | null
         }>
-      }
-      regions: { nodes: RawRegion[] }
+      } | null
+      regions: { nodes: RawRegion[] } | null
     }
+
+    // Shop-level fallbacks for markets that carry no settings of their own.
+    const shopCurrency = json.data?.shop?.currencyCode ?? ''
+    const shopUrlRoot = json.data?.shop?.primaryDomain?.url ?? null
+    const shopLocales = json.data?.shopLocales ?? []
+    const shopPrimaryLocale = shopLocales.find((l) => l.primary) ?? shopLocales[0] ?? null
 
     return (nodes as RawMarket[]).map((m) => {
       const presence = m.webPresences?.nodes?.[0]
       const rootUrls = presence?.rootUrls ?? []
       // Pick the URL matching the web-presence's default locale; fall back to the
-      // first available rootUrl so single-locale presences still work.
+      // first available rootUrl so single-locale presences still work, and finally
+      // to the shop's primary domain when the market has no web presence at all.
       const defaultLocaleCode = presence?.defaultLocale?.locale
       const matchedRootUrl =
-        rootUrls.find((r) => r.locale === defaultLocaleCode)?.url ?? rootUrls[0]?.url ?? null
+        rootUrls.find((r) => r.locale === defaultLocaleCode)?.url ??
+        rootUrls[0]?.url ??
+        shopUrlRoot
       // Extract ISO country codes from MarketRegionCountry nodes — non-country
       // region types (e.g. "rest of world") return as empty objects and are
       // filtered out by the truthy check on `code`.
       const countryCodes = (m.regions?.nodes ?? [])
         .map((r) => r.code)
         .filter((c): c is string => typeof c === 'string' && c.length > 0)
+
+      // Locales: a market without a web presence still publishes in the shop's
+      // own locales, so offer those rather than an empty language picker.
+      const defaultLocale = presence?.defaultLocale ?? shopPrimaryLocale
+      const alternateLocales =
+        presence?.alternateLocales ??
+        shopLocales.filter((l) => l.locale !== defaultLocale?.locale)
+
       return {
         id: m.id,
         name: m.name,
         handle: m.handle,
         status: (m.status === 'ACTIVE' ? 'ACTIVE' : 'DRAFT') as 'ACTIVE' | 'DRAFT',
         type: m.type,
-        currency: m.currencySettings.baseCurrency.currencyCode,
-        currencyName: m.currencySettings.baseCurrency.currencyName,
-        defaultLocale: presence?.defaultLocale ?? null,
-        alternateLocales: presence?.alternateLocales ?? [],
+        currency: m.currencySettings?.baseCurrency?.currencyCode ?? shopCurrency,
+        currencyName: m.currencySettings?.baseCurrency?.currencyName ?? null,
+        defaultLocale,
+        alternateLocales,
         marketUrl: matchedRootUrl,
         countryCodes,
       }
@@ -773,7 +815,7 @@ export function createShopifyClient({ shopUrl, accessToken }: ShopifyCredentials
   }> {
     const url = shopifyUrl('/graphql.json')
     const query = `{
-      shop { name myshopifyDomain }
+      shop { name myshopifyDomain primaryDomain { url } }
       currentAppInstallation { accessScopes { handle } }
       Market: __type(name: "Market") {
         name

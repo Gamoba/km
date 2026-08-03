@@ -15,7 +15,11 @@ function normalizeShopUrl(input: string): string {
 
 type ProbeBody = {
   data?: {
-    shop?: { name?: string; myshopifyDomain?: string } | null
+    shop?: {
+      name?: string
+      myshopifyDomain?: string
+      primaryDomain?: { url?: string } | null
+    } | null
     currentAppInstallation?: { accessScopes?: Array<{ handle: string }> }
   }
   errors?: Array<{ message?: string }>
@@ -89,6 +93,13 @@ export async function POST(
   const scopes = parsed.data?.currentAppInstallation?.accessScopes?.map((s) => s.handle) ?? []
   const readMarketsMissing = !scopes.includes('read_markets')
 
+  // Customer-facing storefront root (e.g. "https://www.vinnu.dk"). Product links
+  // fall back to this when the selected market has no Shopify Markets web
+  // presence of its own — see migration 030. Trailing slash stripped so callers
+  // can append paths without doubling up.
+  const primaryDomain =
+    parsed.data?.shop?.primaryDomain?.url?.trim().replace(/\/+$/, '') || null
+
   // ── Persist (encrypted) on success ──────────────────────────────────────────
   const enc = encryptToken(accessToken)
   const now = new Date().toISOString()
@@ -98,6 +109,7 @@ export async function POST(
     .from('projects')
     .update({
       shop_url: shopUrl,
+      primary_domain: primaryDomain,
       access_token_ciphertext: enc.ciphertext,
       access_token_iv: enc.iv,
       access_token_tag: enc.tag,

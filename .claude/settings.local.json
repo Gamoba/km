@@ -100,7 +100,12 @@
       "Bash(curl -s -o /dev/null \"http://localhost:3000/login\")",
       "Bash(curl -s http://localhost:3000/login)",
       "Bash(curl -s -o /dev/null -w \"optimize route: %{http_code}\\\\n\" \"http://localhost:3000/feed/test/optimize/test\")",
-      "Bash(curl -s -o /dev/null -w \"route: %{http_code}\\\\n\" \"http://localhost:3000/feed/test/optimize/test\")"
+      "Bash(curl -s -o /dev/null -w \"route: %{http_code}\\\\n\" \"http://localhost:3000/feed/test/optimize/test\")",
+      "Bash(cd \"c:/Users/kenne/km-product-feed-generator\" && cp \"C:/Users/kenne/AppData/Local/Temp/claude/c--Users-kenne-km-product-feed-generator/dfd9f2e9-883b-45b5-847a-7d090cfbeee2/scratchpad/who-owns.ts\" scripts/_tmp-who-owns.ts && npx tsx scripts/_tmp-who-owns.ts 2>&1 | tail -60; rm -f scripts/_tmp-who-owns.ts)",
+      "Bash(node -e \"console.log\\(JSON.stringify\\(require\\('./package.json'\\).scripts,null,2\\)\\)\")"
+    ],
+    "additionalDirectories": [
+      "C:\\Users\\kenne\\km-product-feed-generator\\scripts"
     ]
   }
 }

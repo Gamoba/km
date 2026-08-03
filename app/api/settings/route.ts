@@ -33,7 +33,17 @@ export async function GET(req: Request) {
     .eq('feed_id', feedId)
     .maybeSingle()
 
-  return NextResponse.json({ settings: data ?? null })
+  // The project's storefront domain, so the mapping preview can build product
+  // links the same way the generated feed does when the selected market has no
+  // web presence of its own (see resolveFeedBaseUrl in lib/feedGenerator.ts).
+  const { data: project } = owned.project_id
+    ? await db.from('projects').select('primary_domain').eq('id', owned.project_id).maybeSingle()
+    : { data: null }
+
+  return NextResponse.json({
+    settings: data ?? null,
+    primaryDomain: (project?.primary_domain as string | null) ?? null,
+  })
 }
 
 export async function POST(req: Request) {

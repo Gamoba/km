@@ -62,7 +62,8 @@ function MarketCard({
         >
           <span>
             <span style={{ fontWeight: 500, color: 'var(--color-text-secondary)' }}>Currency:</span>{' '}
-            {market.currency} — {market.currencyName}
+            {market.currency}
+            {market.currencyName ? ` — ${market.currencyName}` : ''}
           </span>
           {allLocales.length > 0 && (
             <span>
@@ -393,7 +394,8 @@ export function SettingsClient({
                   >
                     <p className="ff-label">Currency</p>
                     <p className="mt-0.5" style={{ fontSize: '12px', fontWeight: 500, color: 'var(--color-text-primary)' }}>
-                      {currency} — {selectedMarket.currencyName}
+                      {currency}
+                      {selectedMarket.currencyName ? ` — ${selectedMarket.currencyName}` : ''}
                     </p>
                   </div>
                 </div>

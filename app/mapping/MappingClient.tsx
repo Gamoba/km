@@ -267,13 +267,13 @@ type PreviewProduct = {
 
 // `marketUrl` may be a subdomain (https://shop.fr) or a subfolder (https://shop.com/fr) —
 // in both cases we strip a trailing slash and append /products/<handle>.
+//
+// Mirrors buildProductUrl in lib/feedFilters.ts, including the absence of an env
+// fallback: NEXT_PUBLIC_SHOP_DOMAIN is one global value, so using it here showed
+// a preview link to a different merchant's store. No base URL means no link.
 function buildClientProductUrl(handle: string | null | undefined, marketUrl: string | null): string {
-  if (!handle) return ''
-  if (marketUrl) {
-    return `${marketUrl.replace(/\/+$/, '')}/products/${handle}`
-  }
-  const domain = process.env.NEXT_PUBLIC_SHOP_DOMAIN ?? ''
-  return domain ? `https://${domain}/products/${handle}` : ''
+  if (!handle || !marketUrl) return ''
+  return `${marketUrl.replace(/\/+$/, '')}/products/${handle}`
 }
 
 function resolveClientField(
@@ -3390,9 +3390,16 @@ export default function MappingClient({
   useEffect(() => {
     fetch(`/api/settings?feedId=${encodeURIComponent(feedId)}`)
       .then((r) => r.json())
-      .then((data: { settings?: { market_url?: string | null } | null }) => {
-        setMarketUrlState(data.settings?.market_url ?? null)
-      })
+      .then(
+        (data: {
+          settings?: { market_url?: string | null } | null
+          primaryDomain?: string | null
+        }) => {
+          // Same precedence as the generated feed: market URL first, then the
+          // project's own storefront domain.
+          setMarketUrlState(data.settings?.market_url ?? data.primaryDomain ?? null)
+        }
+      )
       .catch(() => {})
   }, [feedId])
 
