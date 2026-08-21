@@ -40,6 +40,7 @@ export type SupabaseProduct = {
   tags: string | null
   images: unknown[]
   variants: unknown[]
+  options: unknown[]
   collections: unknown[]
   synced_at: string | null
   created_at: string
@@ -121,6 +122,9 @@ export async function syncProducts(feedId: string): Promise<SyncResult> {
     tags: p.tags,
     images: p.images,
     variants: p.variants,
+    // Option DEFINITIONS ("Size", "Colour"). Already present in the Shopify
+    // response; migration 034 gives it somewhere to live.
+    options: p.options ?? [],
     collections: p.collections,
     synced_at: now,
     updated_at: now,
@@ -280,7 +284,7 @@ export function toShopifyData(products: SupabaseProduct[]): ShopifyData {
       template_suffix: null,
       admin_graphql_api_id: '',
       variants: (p.variants as unknown[]) as import('@/lib/shopify').ShopifyVariant[],
-      options: [],
+      options: ((p.options as unknown[]) ?? []) as import('@/lib/shopify').ShopifyOption[],
       images: (p.images as unknown[]) as import('@/lib/shopify').ShopifyImage[],
       image: null,
       metafields: p.metafields.map((mf) => ({
