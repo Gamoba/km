@@ -31,8 +31,10 @@ export type GoogleAdsFeedSettings = {
   customer_name: string | null
   currency_code: string | null
   feed_label: string | null
-  roas_conversion_action: string | null
-  poas_conversion_action: string | null
+  // Sets, summed — see ActionChoice in lib/googleAdsAnalytics.ts. Empty array,
+  // never null, so "nothing chosen" has one representation.
+  roas_conversion_actions: string[]
+  poas_conversion_actions: string[]
   id_pattern: 'auto' | IdPattern
   id_pattern_country: string | null
   sync_window_days: number
@@ -47,7 +49,7 @@ export type GoogleAdsFeedSettings = {
 
 const SETTINGS_COLUMNS =
   'id, feed_id, connection_id, customer_id, customer_name, currency_code, feed_label, ' +
-  'roas_conversion_action, poas_conversion_action, id_pattern, id_pattern_country, ' +
+  'roas_conversion_actions, poas_conversion_actions, id_pattern, id_pattern_country, ' +
   'sync_window_days, last_synced_at, last_sync_error, ' +
   'bucket_level, bucket_window_days, buckets_computed_at'
 

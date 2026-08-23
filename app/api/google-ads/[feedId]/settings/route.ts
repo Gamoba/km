@@ -13,11 +13,19 @@ type Body = {
   currencyCode?: string | null
   loginCustomerId?: string | null
   feedLabel?: string | null
-  roasConversionAction?: string | null
-  poasConversionAction?: string | null
+  /** Summed sets — see ActionChoice in lib/googleAdsAnalytics.ts. */
+  roasConversionActions?: string[] | null
+  poasConversionActions?: string[] | null
   syncWindowDays?: number
   /** Run the first sync immediately after saving. */
   syncNow?: boolean
+}
+
+// Deduped and emptied of blanks. Duplicates would double-count an action against
+// itself — the one kind of double counting that is never intentional.
+function cleanActions(v: string[] | null | undefined): string[] {
+  if (!Array.isArray(v)) return []
+  return [...new Set(v.map((a) => (typeof a === 'string' ? a.trim() : '')).filter(Boolean))]
 }
 
 // POST — save a feed's Google Ads setup, and optionally pull data straight away.
@@ -71,8 +79,8 @@ export async function POST(
       customer_name: body.customerName ?? null,
       currency_code: body.currencyCode ?? null,
       feed_label: body.feedLabel?.trim() || null,
-      roas_conversion_action: body.roasConversionAction ?? null,
-      poas_conversion_action: body.poasConversionAction ?? null,
+      roas_conversion_actions: cleanActions(body.roasConversionActions),
+      poas_conversion_actions: cleanActions(body.poasConversionActions),
       ...(body.syncWindowDays ? { sync_window_days: body.syncWindowDays } : {}),
     })
 

@@ -5,6 +5,7 @@ import { Fragment, useMemo, useState } from 'react'
 import {
   formatInt,
   formatMoney,
+  formatPercent,
   formatRatio,
   type ActionChoice,
   type AvailableAction,
@@ -19,8 +20,8 @@ type SettingsView = {
   customerName: string | null
   customerId: string | null
   currency: string | null
-  roasAction: string | null
-  poasAction: string | null
+  roasActions: string[]
+  poasActions: string[]
   lastSyncedAt: string | null
   lastSyncError: string | null
   feedLabel: string | null
@@ -39,15 +40,35 @@ type Props = {
   settings: SettingsView | null
   /** Every conversion action with data in this window, largest value first. */
   availableActions: AvailableAction[]
-  /** What the ROAS/POAS columns currently mean. */
+  /** What the ROAS/POAS columns currently mean. Several actions are summed. */
   activeActions: ActionChoice
   rows: ProductRow[]
+  /**
+   * Catalogue margin per product_ref, from Shopify's cost per item. A product
+   * absent from this map, or present with margin null, has an UNKNOWN margin —
+   * never a zero one. See lib/variantCosts.ts.
+   */
+  margins: Record<string, { margin: number | null; coverage: number }>
+  marginCoverage: { withMargin: number; products: number }
   totals: Totals | null
   from: string
   to: string
 }
 
-type SortKey = 'cost' | 'roas' | 'poas' | 'clicks' | 'impressions' | 'roas_value' | 'poas_value'
+type Row = ProductRow & { margin: number | null; marginCoverage: number }
+
+type SortKey =
+  | 'cost'
+  | 'roas'
+  | 'poas'
+  | 'clicks'
+  | 'impressions'
+  | 'roas_value'
+  | 'poas_value'
+  | 'margin'
+
+const describeActions = (list: string[]): string =>
+  list.length === 0 ? 'not selected' : list.map((a) => `«${a}»`).join(' + ')
 
 function compare(a: number | null, b: number | null, dir: 1 | -1): number {
   if (a === null && b === null) return 0
@@ -70,6 +91,8 @@ export function GoogleAdsClient({
   availableActions,
   activeActions,
   rows,
+  margins,
+  marginCoverage,
   totals,
   from,
   to,
@@ -90,28 +113,47 @@ export function GoogleAdsClient({
 
   // Window and metric definition both live in the URL, so a particular view is
   // shareable and survives a refresh. Changing one must preserve the others.
-  const urlWith = (patch: Record<string, string | null>) => {
+  //
+  // The action params are ALWAYS emitted, even when empty, because the server
+  // treats an absent param as "never chosen here" and falls back to the saved
+  // default. Without the empty marker, unticking everything would silently
+  // restore the default instead of clearing the column.
+  const urlWith = (patch: { days?: Window; roas?: string[]; poas?: string[] }) => {
     const q = new URLSearchParams()
-    q.set('days', String(days))
-    if (activeActions.roas) q.set('roas', activeActions.roas)
-    if (activeActions.poas) q.set('poas', activeActions.poas)
-    for (const [k, v] of Object.entries(patch)) {
-      if (v === null || v === '') q.delete(k)
-      else q.set(k, v)
+    q.set('days', String(patch.days ?? days))
+    for (const key of ['roas', 'poas'] as const) {
+      const list = patch[key] ?? activeActions[key]
+      if (list.length) for (const a of list) q.append(key, a)
+      else q.set(key, '')
     }
     return `/feed/${feedId}/google-ads?${q.toString()}`
   }
 
   const sorted = useMemo(() => {
-    const copy = [...rows]
-    copy.sort((a, b) => compare(a[sortKey], b[sortKey], sortDir))
-    return copy
-  }, [rows, sortKey, sortDir])
+    const merged: Row[] = rows.map((r) => {
+      const m = r.productRef ? margins[r.productRef] : undefined
+      return { ...r, margin: m?.margin ?? null, marginCoverage: m?.coverage ?? 0 }
+    })
+    // compare() already sends nulls last in both directions, so products with no
+    // cost never masquerade as the best or worst margin in the catalogue.
+    merged.sort((a, b) => compare(a[sortKey], b[sortKey], sortDir))
+    return merged
+  }, [rows, margins, sortKey, sortDir])
 
   const unmatchedCost = useMemo(
     () => rows.filter((r) => r.unmatched).reduce((n, r) => n + r.cost, 0),
     [rows]
   )
+
+  // Order is not meaningful — a set of actions is the same choice however it was
+  // ticked — so compare as sets rather than by position.
+  const sameSet = (a: string[], b: string[]) =>
+    a.length === b.length && a.every((x) => b.includes(x))
+
+  const defaultsDiffer =
+    !!settings &&
+    (!sameSet(activeActions.roas, settings.roasActions) ||
+      !sameSet(activeActions.poas, settings.poasActions))
 
   function setSort(key: SortKey) {
     if (key === sortKey) setSortDir((d) => (d === 1 ? -1 : 1))
@@ -133,8 +175,8 @@ export function GoogleAdsClient({
     setLoadingVariants(productRef)
     try {
       const q = new URLSearchParams({ product: productRef, days: String(days) })
-      if (activeActions.roas) q.set('roas', activeActions.roas)
-      if (activeActions.poas) q.set('poas', activeActions.poas)
+      for (const a of activeActions.roas) q.append('roas', a)
+      for (const a of activeActions.poas) q.append('poas', a)
       const res = await fetch(`/api/google-ads/${feedId}/variants?${q.toString()}`)
       const json = await res.json()
       if (res.ok) setVariants((v) => ({ ...v, [productRef]: json.variants ?? [] }))
@@ -158,8 +200,8 @@ export function GoogleAdsClient({
           customerName: settings.customerName,
           currencyCode: settings.currency,
           feedLabel: settings.feedLabel,
-          roasConversionAction: activeActions.roas,
-          poasConversionAction: activeActions.poas,
+          roasConversionActions: activeActions.roas,
+          poasConversionActions: activeActions.poas,
           syncNow: false,
         }),
       })
@@ -224,7 +266,7 @@ export function GoogleAdsClient({
                 {windows.map((w) => (
                   <button
                     key={w}
-                    onClick={() => router.push(urlWith({ days: String(w) }))}
+                    onClick={() => router.push(urlWith({ days: w }))}
                     className="wl-pill"
                     style={{
                       cursor: 'pointer',
@@ -277,8 +319,8 @@ export function GoogleAdsClient({
             hasConnection={hasConnection}
             current={{
               customerId: settings?.customerId ?? null,
-              roasAction: settings?.roasAction ?? null,
-              poasAction: settings?.poasAction ?? null,
+              roasActions: settings?.roasActions ?? [],
+              poasActions: settings?.poasActions ?? [],
               feedLabel: settings?.feedLabel ?? null,
             }}
             onDone={() => setShowSetup(false)}
@@ -333,29 +375,27 @@ export function GoogleAdsClient({
             <div className="flex flex-wrap items-end gap-4">
               <MetricPicker
                 label="Revenue (ROAS)"
-                value={activeActions.roas}
+                selected={activeActions.roas}
                 actions={availableActions}
                 currency={currency}
                 onChange={(v) => router.push(urlWith({ roas: v }))}
               />
               <MetricPicker
                 label="Gross profit (POAS)"
-                value={activeActions.poas}
+                selected={activeActions.poas}
                 actions={availableActions}
                 currency={currency}
                 onChange={(v) => router.push(urlWith({ poas: v }))}
               />
-              {settings &&
-                (activeActions.roas !== settings.roasAction ||
-                  activeActions.poas !== settings.poasAction) && (
-                  <button
-                    onClick={saveDefaults}
-                    disabled={savingDefaults}
-                    className="wl-btn-secondary"
-                  >
-                    {savingDefaults ? 'Saving…' : 'Save as default'}
-                  </button>
-                )}
+              {settings && defaultsDiffer && (
+                <button
+                  onClick={saveDefaults}
+                  disabled={savingDefaults}
+                  className="wl-btn-secondary"
+                >
+                  {savingDefaults ? 'Saving…' : 'Save as default'}
+                </button>
+              )}
             </div>
             <p
               style={{
@@ -370,6 +410,20 @@ export function GoogleAdsClient({
               to each action is what it reports over the period — an action reporting many
               times the real revenue is normally a &laquo;view item&raquo; tracker, not revenue.
               Switch freely: every action has already been fetched.
+            </p>
+            <p
+              style={{
+                fontSize: '12px',
+                color: 'var(--ink-muted)',
+                marginTop: '6px',
+                lineHeight: 1.5,
+                maxWidth: '62ch',
+              }}
+            >
+              Ticking several actions adds them together. That is what you want for actions
+              covering separate slices — new versus returning, or one per market — but two
+              actions that both count the whole account will count every order twice. Nothing
+              here can tell the difference, so the choice is yours.
             </p>
           </section>
         )}
@@ -432,14 +486,19 @@ export function GoogleAdsClient({
                     <Th sortable active={sortKey === 'cost'} dir={sortDir} onClick={() => setSort('cost')}>
                       Cost
                     </Th>
+                    <Th sortable active={sortKey === 'margin'} dir={sortDir} onClick={() => setSort('margin')}>
+                      Margin
+                    </Th>
                     <Th sortable active={sortKey === 'roas_value'} dir={sortDir} onClick={() => setSort('roas_value')}>
                       Revenue
+                      <CountPill n={activeActions.roas.length} />
                     </Th>
                     <Th sortable active={sortKey === 'roas'} dir={sortDir} onClick={() => setSort('roas')}>
                       ROAS
                     </Th>
                     <Th sortable active={sortKey === 'poas_value'} dir={sortDir} onClick={() => setSort('poas_value')}>
                       Profit
+                      <CountPill n={activeActions.poas.length} />
                     </Th>
                     <Th sortable active={sortKey === 'poas'} dir={sortDir} onClick={() => setSort('poas')}>
                       POAS
@@ -492,6 +551,9 @@ export function GoogleAdsClient({
                           <Td>{formatInt(r.impressions)}</Td>
                           <Td>{formatInt(r.clicks)}</Td>
                           <Td>{formatMoney(r.cost, currency)}</Td>
+                          <Td>
+                            <Margin value={r.margin} coverage={r.marginCoverage} />
+                          </Td>
                           <Td>{formatMoney(r.roas_value, currency)}</Td>
                           <Td>
                             <Ratio value={r.roas} />
@@ -518,7 +580,7 @@ export function GoogleAdsClient({
 
                         {isOpen && (
                           <tr>
-                            <td colSpan={9} style={{ background: 'var(--bg-surface)', padding: '0 18px 14px 40px' }}>
+                            <td colSpan={10} style={{ background: 'var(--bg-surface)', padding: '0 18px 14px 40px' }}>
                               {loadingVariants === r.productRef ? (
                                 <p style={{ fontSize: '12px', color: 'var(--ink-muted)', padding: '10px 0' }}>
                                   Loading variants…
@@ -544,14 +606,23 @@ export function GoogleAdsClient({
         {/* ── Footnotes that stop the numbers being misread ──────── */}
         {connected && rows.length > 0 && (
           <div className="space-y-1.5" style={{ fontSize: '12px', color: 'var(--ink-muted)' }}>
+            {/* Spelled out in full rather than as a count: which actions produced
+                a number is the thing someone needs when the number surprises them. */}
             <p>
-              Revenue = &laquo;{activeActions.roas ?? 'not selected'}&raquo; · Gross profit =
-              &laquo;{activeActions.poas ?? 'not selected'}&raquo;
+              Revenue = {describeActions(activeActions.roas)} · Gross profit ={' '}
+              {describeActions(activeActions.poas)}
             </p>
             <p>
               Only cost Google can attribute to a product is included. Performance Max
               spend on non-shopping placements is not counted, so these figures are lower
               than the account&apos;s total cost.
+            </p>
+            <p>
+              Margin is list price minus Shopify&apos;s cost per item — gross margin, before
+              shipping, fees and returns. Known for {marginCoverage.withMargin} of{' '}
+              {marginCoverage.products} products; the rest show &laquo;—&raquo; because no cost
+              is entered, not because the margin is zero. An asterisk means the cost covers
+              only some of the product&apos;s variants.
             </p>
             {unmatchedCost > 0 && (
               <p style={{ color: 'var(--accent-amber)' }}>
@@ -606,43 +677,203 @@ function Stat({
   )
 }
 
+/**
+ * Multi-select over conversion actions. A checkbox list rather than a native
+ * `<select multiple>`: the amounts beside each name are what stop someone
+ * picking a view tracker, and a native multi-select renders them badly and
+ * makes ctrl-click the only way to add a second choice.
+ *
+ * Selections are applied on close, not per tick, so choosing three actions is
+ * one navigation instead of three.
+ */
 function MetricPicker({
   label,
-  value,
+  selected,
   actions,
   currency,
   onChange,
 }: {
   label: string
-  value: string | null
+  selected: string[]
   actions: AvailableAction[]
   currency: string
-  onChange: (v: string) => void
+  onChange: (v: string[]) => void
 }) {
+  const [open, setOpen] = useState(false)
+  const [draft, setDraft] = useState<string[] | null>(null)
+  const current = draft ?? selected
+
+  function close() {
+    setOpen(false)
+    if (draft && (draft.length !== selected.length || draft.some((a) => !selected.includes(a)))) {
+      onChange(draft)
+    }
+    setDraft(null)
+  }
+
+  const summary =
+    current.length === 0
+      ? 'Not selected'
+      : current.length === 1
+        ? current[0]
+        : `${current.length} actions summed`
+
   return (
     <div className="space-y-1.5" style={{ minWidth: '260px', flex: '1 1 260px' }}>
       <div className="wl-eyebrow">{label}</div>
-      <select
-        value={value ?? ''}
-        onChange={(e) => onChange(e.target.value)}
-        style={{
-          width: '100%',
-          padding: '8px 10px',
-          borderRadius: '10px',
-          border: '1px solid var(--hairline)',
-          background: 'var(--bg-base)',
-          color: 'var(--ink)',
-          fontSize: '13px',
-        }}
-      >
-        <option value="">Not selected</option>
-        {actions.map((a) => (
-          <option key={a.name} value={a.name}>
-            {a.name} — {formatMoney(a.value, currency)} · {a.items} items
-          </option>
-        ))}
-      </select>
+
+      <div style={{ position: 'relative' }}>
+        <button
+          type="button"
+          onClick={() => (open ? close() : setOpen(true))}
+          style={{
+            width: '100%',
+            padding: '8px 10px',
+            borderRadius: '10px',
+            border: '1px solid var(--hairline)',
+            background: 'var(--bg-base)',
+            color: current.length ? 'var(--ink)' : 'var(--ink-muted)',
+            fontSize: '13px',
+            textAlign: 'left',
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px',
+          }}
+        >
+          <span className="truncate" style={{ flex: 1 }}>
+            {summary}
+          </span>
+          <span style={{ color: 'var(--ink-muted)', fontSize: '11px' }}>{open ? '▲' : '▼'}</span>
+        </button>
+
+        {open && (
+          <>
+            {/* Catches the click that dismisses the panel, so a selection is
+                committed by clicking away as well as by the toggle. */}
+            <div
+              onClick={close}
+              style={{ position: 'fixed', inset: 0, zIndex: 20 }}
+              aria-hidden
+            />
+            <div
+              style={{
+                position: 'absolute',
+                zIndex: 21,
+                top: 'calc(100% + 6px)',
+                left: 0,
+                right: 0,
+                maxHeight: '320px',
+                overflowY: 'auto',
+                background: 'var(--bg-base)',
+                border: '1px solid var(--hairline)',
+                borderRadius: '10px',
+              }}
+            >
+              {actions.map((a) => {
+                const on = current.includes(a.name)
+                return (
+                  <label
+                    key={a.name}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'flex-start',
+                      gap: '9px',
+                      padding: '9px 12px',
+                      borderBottom: '0.5px solid var(--hairline)',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={on}
+                      onChange={() =>
+                        setDraft(
+                          on ? current.filter((n) => n !== a.name) : [...current, a.name]
+                        )
+                      }
+                      style={{ marginTop: '2px', accentColor: 'var(--accent-purple)' }}
+                    />
+                    <span style={{ minWidth: 0 }}>
+                      <span
+                        className="block truncate"
+                        style={{ fontSize: '13px', color: 'var(--ink)' }}
+                      >
+                        {a.name}
+                      </span>
+                      <span style={{ fontSize: '11px', color: 'var(--ink-muted)' }}>
+                        {formatMoney(a.value, currency)} · {a.items} items
+                      </span>
+                    </span>
+                  </label>
+                )
+              })}
+              {current.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setDraft([])}
+                  style={{
+                    width: '100%',
+                    padding: '9px 12px',
+                    background: 'none',
+                    border: 'none',
+                    textAlign: 'left',
+                    fontSize: '12px',
+                    color: 'var(--ink-muted)',
+                    cursor: 'pointer',
+                  }}
+                >
+                  Clear selection
+                </button>
+              )}
+            </div>
+          </>
+        )}
+      </div>
     </div>
+  )
+}
+
+/**
+ * Catalogue margin. An em dash for "no cost entered in Shopify" — deliberately
+ * the same glyph the other columns use for absent data, because an unknown
+ * margin is exactly that and must not read as 0%.
+ *
+ * Partial coverage is flagged rather than hidden: a product whose margin covers
+ * 2 of its 6 variants is a weaker claim than one covering all 6.
+ */
+function Margin({ value, coverage }: { value: number | null; coverage: number }) {
+  if (value === null) {
+    return <span style={{ color: 'var(--ink-muted)' }}>—</span>
+  }
+  const partial = coverage > 0 && coverage < 1
+  return (
+    <span
+      title={partial ? `Cost known for ${Math.round(coverage * 100)}% of variants` : undefined}
+      style={{ color: value < 0 ? 'var(--accent-red)' : 'var(--ink)' }}
+    >
+      {formatPercent(value, 0)}
+      {partial && <span style={{ color: 'var(--ink-muted)' }}>*</span>}
+    </span>
+  )
+}
+
+/** Shown beside a column header when more than one action feeds it. */
+function CountPill({ n }: { n: number }) {
+  if (n < 2) return null
+  return (
+    <span
+      className="wl-pill"
+      title={`${n} conversion actions summed`}
+      style={{
+        marginLeft: '6px',
+        background: 'var(--bg-surface)',
+        color: 'var(--ink-muted)',
+        fontVariantNumeric: 'tabular-nums',
+      }}
+    >
+      ×{n}
+    </span>
   )
 }
 

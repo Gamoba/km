@@ -20,6 +20,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import { dbError, AppError } from '@/lib/errors'
 import { buildItemId, type IdPattern } from '@/lib/googleAdsIds'
 import { getFeedSettings, type GoogleAdsFeedSettings } from '@/lib/feedGoogleAds'
+import { getProductMargins } from '@/lib/variantCosts'
 import {
   derive,
   windowRange,
@@ -39,6 +40,11 @@ export const BUCKET_METRICS = [
   'clicks',
   'impressions',
   'profit_after_ad_spend',
+  // Catalogue margin from Shopify's cost per item — NOT the `margin` that
+  // derive() computes from the two conversion actions. This one exists whether
+  // or not a product has ever been advertised, which is what makes rules like
+  // "high margin, no traffic" possible.
+  'cogs_margin',
 ] as const
 export type BucketMetric = (typeof BUCKET_METRICS)[number]
 
@@ -95,6 +101,14 @@ export type BucketEntity = {
   title: string | null
   /** False when Google reported nothing at all for this entity in the window. */
   hasData: boolean
+  /**
+   * Catalogue margin, or null when no cost is entered. At variant level this is
+   * the PARENT PRODUCT's margin: variant_costs is per variant, but the roll-up
+   * that turns cost into a margin is per product today. Variants of one product
+   * can differ, so a per-variant margin is a later refinement — inheriting is
+   * the approximation, and it is stated here rather than hidden.
+   */
+  cogsMargin: number | null
   metrics: Derived & {
     cost: number
     clicks: number
@@ -126,6 +140,10 @@ function metricValue(e: BucketEntity, metric: BucketMetric): number | null {
       return e.metrics.clicks
     case 'impressions':
       return e.metrics.impressions
+    // Null when no cost is entered in Shopify, so it fails every numeric
+    // operator — an un-costed product is never swept into a margin bucket.
+    case 'cogs_margin':
+      return e.cogsMargin
   }
 }
 
@@ -268,8 +286,6 @@ export async function deleteBucket(
 
 // ── Entity assembly ──────────────────────────────────────────────────────────
 
-const INSERT_CHUNK = 500
-
 type CatalogueProduct = {
   shopify_id: string
   title: string | null
@@ -293,9 +309,13 @@ async function buildEntities(
 ): Promise<BucketEntity[]> {
   const { from, to } = windowRange(windowDays)
   const actions = {
-    p_roas_action: settings.roas_conversion_action,
-    p_poas_action: settings.poas_conversion_action,
+    p_roas_actions: settings.roas_conversion_actions ?? [],
+    p_poas_actions: settings.poas_conversion_actions ?? [],
   }
+
+  // Margins for the whole catalogue in one query. Costed independently of the
+  // ads window: a margin is a property of the product, not of a date range.
+  const margins = await getProductMargins(db, feedId)
 
   const byRef = new Map<string, BucketEntity>()
 
@@ -317,7 +337,14 @@ async function buildEntities(
       poas_conversions: 0,
       poas_value: Number(row.poas_value ?? 0),
     }
-    return { ref, productRef, title, hasData, metrics: { ...raw, ...derive(raw) } }
+    return {
+      ref,
+      productRef,
+      title,
+      hasData,
+      cogsMargin: productRef ? (margins.get(productRef)?.margin ?? null) : null,
+      metrics: { ...raw, ...derive(raw) },
+    }
   }
 
   if (level === 'product') {
@@ -417,18 +444,25 @@ export async function recomputeBuckets(
   const windowDays = settings.bucket_window_days ?? 30
   const warnings: string[] = []
 
-  if (!settings.roas_conversion_action) {
+  const roasActions = settings.roas_conversion_actions ?? []
+  const poasActions = settings.poas_conversion_actions ?? []
+
+  if (!roasActions.length) {
     warnings.push('No revenue conversion action selected — ROAS rules will never match.')
   }
-  if (!settings.poas_conversion_action) {
+  if (!poasActions.length) {
     warnings.push('No gross profit conversion action selected — POAS rules will never match.')
   }
-  if (
-    settings.roas_conversion_action &&
-    settings.roas_conversion_action === settings.poas_conversion_action
-  ) {
+
+  // Actions counted on both sides are not an error — the same order really is
+  // reported by several actions — but they make POAS partly a restatement of
+  // ROAS, which is worth saying out loud before someone bids on it.
+  const shared = roasActions.filter((a) => poasActions.includes(a))
+  if (shared.length && shared.length === roasActions.length && shared.length === poasActions.length) {
+    warnings.push('Revenue and gross profit use the same conversion actions, so POAS equals ROAS.')
+  } else if (shared.length) {
     warnings.push(
-      'Revenue and gross profit point at the same conversion action, so POAS equals ROAS.'
+      `${shared.length} conversion action${shared.length === 1 ? '' : 's'} count towards both revenue and gross profit.`
     )
   }
 
@@ -455,37 +489,34 @@ export async function recomputeBuckets(
 
   const assignment = assign(entities, buckets)
 
-  // Full replace: membership is derived, so a partial update would leave stale
-  // rows for entities that no longer match anything.
-  const { error: delErr } = await db
-    .from('google_ads_bucket_members')
-    .delete()
-    .eq('feed_id', feedId)
-  if (delErr) dbError('recomputeBuckets/delete', delErr)
-
+  // Full replace, in ONE transaction (migration 036). Membership is derived, so
+  // a partial update would leave stale rows for entities that no longer match —
+  // and a partial REPLACE, which is what a delete followed by separate chunked
+  // inserts leaves behind when one chunk fails, is worse still: the page would
+  // show counts that are wrong rather than merely out of date, with no way to
+  // tell. The RPC deletes, inserts and stamps atomically or does none of it.
+  //
+  // `level` rides as a scalar because it is a property of the whole set, which
+  // keeps the single jsonb payload narrow.
   const now = new Date().toISOString()
-  const rows = entities
+  const members = entities
     .filter((e) => assignment.has(e.ref))
     .map((e) => ({
-      feed_id: feedId,
       bucket_id: assignment.get(e.ref)!,
       ref: e.ref,
-      level,
       product_ref: e.productRef,
-      computed_at: now,
     }))
 
-  for (let i = 0; i < rows.length; i += INSERT_CHUNK) {
-    const { error } = await db
-      .from('google_ads_bucket_members')
-      .insert(rows.slice(i, i + INSERT_CHUNK))
-    if (error) dbError('recomputeBuckets/insert', error)
-  }
-
-  await db
-    .from('google_ads_feed_settings')
-    .update({ buckets_computed_at: now, updated_at: now })
-    .eq('feed_id', feedId)
+  const { data: inserted, error: replaceErr } = await db.rpc(
+    'google_ads_replace_bucket_members',
+    {
+      p_feed_id: feedId,
+      p_level: level,
+      p_members: members,
+      p_computed_at: now,
+    }
+  )
+  if (replaceErr) dbError('recomputeBuckets/replace', replaceErr)
 
   const perBucket = orderBuckets(buckets).map((b) => ({
     id: b.id,
@@ -498,13 +529,18 @@ export async function recomputeBuckets(
     if (previous.get(ref) !== bucketId) moved++
   }
 
+  // Row count as the database actually wrote it, not as we intended to write it.
+  // The two can only differ if the RPC changes shape, and if they ever do the
+  // committed number is the one worth reporting.
+  const assigned = Number(inserted ?? assignment.size)
+
   return {
     level,
     windowDays,
     entities: entities.length,
     withData: entities.filter((e) => e.hasData).length,
-    assigned: assignment.size,
-    unassigned: entities.length - assignment.size,
+    assigned,
+    unassigned: entities.length - assigned,
     moved,
     perBucket,
     warnings,

@@ -40,8 +40,8 @@ export default async function BucketsPage({
         windowDays={30}
         computedAt={null}
         currency={null}
-        roasAction={null}
-        poasAction={null}
+        roasActions={[]}
+        poasActions={[]}
         buckets={[]}
         counts={{}}
         members={[]}
@@ -95,8 +95,8 @@ export default async function BucketsPage({
       windowDays={settings.bucket_window_days ?? 30}
       computedAt={settings.buckets_computed_at}
       currency={settings.currency_code}
-      roasAction={settings.roas_conversion_action}
-      poasAction={settings.poas_conversion_action}
+      roasActions={settings.roas_conversion_actions ?? []}
+      poasActions={settings.poas_conversion_actions ?? []}
       buckets={buckets}
       counts={counts}
       members={members}

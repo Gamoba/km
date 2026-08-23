@@ -20,6 +20,7 @@ const FEED_NAV = [
   // this one — without it prefix matching would light both up at once.
   { label: 'Ads Performance', href: 'google-ads', icon: 'chart', exact: true },
   { label: 'Buckets', href: 'google-ads/buckets', icon: 'layers' },
+  { label: 'Wasted spend', href: 'google-ads/waste', icon: 'trend-down' },
   { label: 'Preview', href: 'preview', icon: 'eye' },
   { label: 'Settings', href: 'settings', icon: 'settings' },
 ] as const
@@ -116,6 +117,11 @@ function NavIcon({ name }: { name: string }) {
       return svg(cls, <>
         <path d="M3 3v18h18"/>
         <path d="M7 15l3.5-4 3 3L20 7"/>
+      </>)
+    case 'trend-down':
+      return svg(cls, <>
+        <polyline points="3,7 9,13 13,9 21,17"/>
+        <polyline points="21,11 21,17 15,17"/>
       </>)
     case 'settings':
       return svg(cls, <>

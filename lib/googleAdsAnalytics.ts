@@ -103,8 +103,46 @@ export function windowRange(days: number, now = new Date()): { from: string; to:
   return { from: f(from), to: f(to) }
 }
 
-/** Which conversion action stands for revenue and which for gross profit. */
-export type ActionChoice = { roas: string | null; poas: string | null }
+/**
+ * Which conversion actions stand for revenue and which for gross profit.
+ *
+ * Sets, not single names: revenue is sometimes split across actions that each
+ * cover part of the account (new vs returning, one per market) and only mean
+ * something added together. The values are SUMMED, and overlapping actions
+ * therefore double-count — that is the operator's call to make, not something
+ * the data can rule out, since the same order is normally counted by several
+ * actions at once.
+ *
+ * Empty array = nothing chosen, which yields null ratios rather than zeroes.
+ */
+export type ActionChoice = { roas: string[]; poas: string[] }
+
+export const NO_ACTIONS: ActionChoice = { roas: [], poas: [] }
+
+/**
+ * What a page should measure with: the URL when someone is exploring a
+ * definition, otherwise the feed's saved default.
+ *
+ * ABSENT and EMPTY are different. No param means "not chosen on this page" and
+ * falls back to the default; `?roas=` means everything was unticked and must not
+ * be quietly refilled. Shared so that following a link from one Google Ads page
+ * to another cannot silently change what the numbers mean.
+ */
+export function resolveActions(
+  params: { roas?: string | string[]; poas?: string | string[] },
+  settings: {
+    roas_conversion_actions?: string[] | null
+    poas_conversion_actions?: string[] | null
+  } | null
+): ActionChoice {
+  const fromParam = (v: string | string[] | undefined): string[] | null =>
+    v === undefined ? null : (Array.isArray(v) ? v : [v]).filter(Boolean)
+
+  return {
+    roas: fromParam(params.roas) ?? settings?.roas_conversion_actions ?? [],
+    poas: fromParam(params.poas) ?? settings?.poas_conversion_actions ?? [],
+  }
+}
 
 export type AvailableAction = {
   name: string
@@ -145,7 +183,7 @@ export async function getProductPerformance(
   db: SupabaseClient,
   feedId: string,
   days: number,
-  actions: ActionChoice = { roas: null, poas: null }
+  actions: ActionChoice = NO_ACTIONS
 ): Promise<{ rows: ProductRow[]; totals: Totals; from: string; to: string }> {
   const { from, to } = windowRange(days)
 
@@ -153,8 +191,8 @@ export async function getProductPerformance(
     p_feed_id: feedId,
     p_from: from,
     p_to: to,
-    p_roas_action: actions.roas,
-    p_poas_action: actions.poas,
+    p_roas_actions: actions.roas,
+    p_poas_actions: actions.poas,
   })
   if (error) dbError('getProductPerformance', error)
 
@@ -207,7 +245,7 @@ export async function getVariantPerformance(
   feedId: string,
   days: number,
   productRef?: string | null,
-  actions: ActionChoice = { roas: null, poas: null }
+  actions: ActionChoice = NO_ACTIONS
 ): Promise<VariantRow[]> {
   const { from, to } = windowRange(days)
 
@@ -216,8 +254,8 @@ export async function getVariantPerformance(
     p_from: from,
     p_to: to,
     p_product_ref: productRef ?? null,
-    p_roas_action: actions.roas,
-    p_poas_action: actions.poas,
+    p_roas_actions: actions.roas,
+    p_poas_actions: actions.poas,
   })
   if (error) dbError('getVariantPerformance', error)
 

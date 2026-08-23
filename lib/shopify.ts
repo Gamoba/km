@@ -185,6 +185,34 @@ type ProductCollectionsResponse = {
   } | null>
 }
 
+// Bulk-fetch per-variant unit cost ("Cost per item" in the admin). Same
+// nodes(ids) shape as the two bulk fetches above; cost is ~2 points per variant,
+// so the batch is smaller to stay clear of the 2000-point bucket:
+//   requested cost ≈ 15 * (1 + 100 * 2) ≈ 3000 — too high, hence BATCH_SIZE 8.
+//
+// unitCost is NULLABLE and that is load-bearing: a variant with no cost entered
+// is not a variant with zero cost. It stays null all the way to the UI so that
+// "unknown margin" never renders as "100% margin".
+type VariantCostsResponse = {
+  nodes: Array<{
+    id: string
+    variants: {
+      nodes: Array<{
+        id: string
+        inventoryItem: { unitCost: { amount: string; currencyCode: string } | null } | null
+      }>
+    }
+  } | null>
+}
+
+export type VariantCost = {
+  productId: number
+  variantId: number
+  /** null when the merchant has not entered a cost. Never coerced to 0. */
+  unitCost: number | null
+  currency: string | null
+}
+
 type ShopLocaleGql = { locale: string; name: string; primary: boolean }
 
 // As of Admin API 2025-04+, MarketWebPresence.rootUrl was replaced with rootUrls
@@ -285,6 +313,8 @@ export type ShopifyClient = {
     country?: string
   ) => Promise<ShopifyData>
   fetchMarkets: () => Promise<ShopifyMarket[]>
+  /** Per-variant "Cost per item". Absent cost stays null, never 0. */
+  fetchVariantCostsBulk: (productIds: number[]) => Promise<VariantCost[]>
   probeShopifyAccess: () => Promise<{
     httpStatus: number
     grantedScopesHeader: string | null
@@ -465,6 +495,64 @@ export function createShopifyClient({ shopUrl, accessToken }: ShopifyCredentials
     }
 
     return map
+  }
+
+  async function fetchVariantCostsBulk(productIds: number[]): Promise<VariantCost[]> {
+    const out: VariantCost[] = []
+    if (productIds.length === 0) return out
+
+    const BATCH_SIZE = 8
+    const FIRST_VARIANTS = 100
+    const gids = productIds.map((id) => `gid://shopify/Product/${id}`)
+
+    for (let i = 0; i < gids.length; i += BATCH_SIZE) {
+      const batch = gids.slice(i, i + BATCH_SIZE)
+      try {
+        const data = await shopifyGraphQL<VariantCostsResponse>(
+          `query VariantCosts($ids: [ID!]!) {
+            nodes(ids: $ids) {
+              ... on Product {
+                id
+                variants(first: ${FIRST_VARIANTS}) {
+                  nodes {
+                    id
+                    inventoryItem { unitCost { amount currencyCode } }
+                  }
+                }
+              }
+            }
+          }`,
+          { ids: batch }
+        )
+
+        for (const node of data.nodes) {
+          if (!node) continue
+          const productId = parseGid(node.id)
+          if (!productId) continue
+          for (const v of node.variants.nodes) {
+            const variantId = parseGid(v.id)
+            if (!variantId) continue
+            const raw = v.inventoryItem?.unitCost?.amount
+            const parsed = raw === undefined || raw === null ? null : Number(raw)
+            out.push({
+              productId,
+              variantId,
+              unitCost: parsed !== null && Number.isFinite(parsed) ? parsed : null,
+              currency: v.inventoryItem?.unitCost?.currencyCode ?? null,
+            })
+          }
+        }
+      } catch (err) {
+        // Same posture as the other bulk fetches: one bad batch must not lose the
+        // rest. A missing batch leaves those variants without a cost row, which
+        // reads as "unknown" — the safe direction.
+        console.error(
+          `Shopify: variant-cost-batch ${Math.floor(i / BATCH_SIZE) + 1} fejlede — ${err}`
+        )
+      }
+    }
+
+    return out
   }
 
   async function fetchProductCollectionsBulk(
@@ -1018,6 +1106,7 @@ export function createShopifyClient({ shopUrl, accessToken }: ShopifyCredentials
     fetchProductsWithAllData,
     fetchProductsLocalized,
     fetchMarkets,
+    fetchVariantCostsBulk,
     probeShopifyAccess,
   }
 }

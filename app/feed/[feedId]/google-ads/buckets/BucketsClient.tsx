@@ -22,8 +22,8 @@ type Props = {
   windowDays: number
   computedAt: string | null
   currency: string | null
-  roasAction: string | null
-  poasAction: string | null
+  roasActions: string[]
+  poasActions: string[]
   buckets: Bucket[]
   counts: Record<string, number>
   members: MemberRow[]
@@ -39,6 +39,7 @@ const METRIC_LABEL: Record<BucketMetric, string> = {
   clicks: 'Clicks',
   impressions: 'Impressions',
   profit_after_ad_spend: 'Profit − cost',
+  cogs_margin: 'Margin (COGS)',
 }
 
 const OPERATORS: { value: BucketOperator; label: string; needsValue: boolean }[] = [
@@ -62,8 +63,8 @@ export function BucketsClient(props: Props) {
     level,
     windowDays,
     computedAt,
-    roasAction,
-    poasAction,
+    roasActions,
+    poasActions,
     buckets,
     counts,
     members,
@@ -222,7 +223,14 @@ export function BucketsClient(props: Props) {
     )
   }
 
-  const sameAction = roasAction && roasAction === poasAction
+  // Actions on both sides are not an error — the same order genuinely is counted
+  // by several actions — but where the two sets are IDENTICAL, POAS is only a
+  // restatement of ROAS and a POAS rule is secretly a ROAS rule.
+  const shared = roasActions.filter((a) => poasActions.includes(a))
+  const sameAction =
+    shared.length > 0 &&
+    shared.length === roasActions.length &&
+    shared.length === poasActions.length
 
   return (
     <Shell feedName={feedName}>
@@ -274,8 +282,9 @@ export function BucketsClient(props: Props) {
       {note && !error && <Banner tone="green">{note}</Banner>}
       {sameAction && (
         <Banner tone="amber">
-          Revenue and gross profit both point at «{roasAction}», so POAS equals ROAS and any
-          POAS rule is really a ROAS rule. Fix it on the Performance page.
+          Revenue and gross profit use the same conversion action
+          {roasActions.length > 1 ? 's' : ''} ({roasActions.join(', ')}), so POAS equals ROAS
+          and any POAS rule is really a ROAS rule. Fix it on the Performance page.
         </Banner>
       )}
 

@@ -18,8 +18,8 @@ type Props = {
   hasConnection: boolean
   current: {
     customerId: string | null
-    roasAction: string | null
-    poasAction: string | null
+    roasActions: string[]
+    poasActions: string[]
     feedLabel: string | null
   }
   onDone: () => void
@@ -87,8 +87,8 @@ export function GoogleAdsSetup({ feedId, hasConnection, current, onDone }: Props
           feedLabel: feedLabel || null,
           // Preserved rather than cleared: re-running setup shouldn't silently
           // reset a metric definition the user already settled on.
-          roasConversionAction: current.roasAction,
-          poasConversionAction: current.poasAction,
+          roasConversionActions: current.roasActions,
+          poasConversionActions: current.poasActions,
           syncNow: true,
         }),
       })

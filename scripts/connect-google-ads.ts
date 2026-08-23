@@ -45,6 +45,14 @@ const flag = (name: string): string | undefined => {
   return i === -1 ? undefined : argv[i + 1]
 }
 const has = (name: string) => argv.includes(name)
+/** Every occurrence of a repeatable flag, deduped: --roas A --roas B → [A, B]. */
+const flagAll = (name: string): string[] => {
+  const out: string[] = []
+  argv.forEach((a, i) => {
+    if (a === name && argv[i + 1] && !argv[i + 1].startsWith('--')) out.push(argv[i + 1])
+  })
+  return [...new Set(out)]
+}
 
 const REFRESH_TOKEN = process.env.GOOGLE_ADS_REFRESH_TOKEN
 const MANAGER = flag('--manager') ?? '345-856-6876'
@@ -72,8 +80,8 @@ async function listFeeds() {
       ? `→ Google Ads ${formatCustomerId(s.customer_id)}${s.last_synced_at ? ` (synced ${s.last_synced_at.slice(0, 10)})` : ' (never synced)'}`
       : '→ not linked'
     console.log(`  ${f.id}  ${String(f.name).padEnd(30)} ${status}`)
-    if (s?.roas_conversion_action) console.log(`      ROAS: ${s.roas_conversion_action}`)
-    if (s?.poas_conversion_action) console.log(`      POAS: ${s.poas_conversion_action}`)
+    if (s?.roas_conversion_actions?.length) console.log(`      ROAS: ${s.roas_conversion_actions.join(' + ')}`)
+    if (s?.poas_conversion_actions?.length) console.log(`      POAS: ${s.poas_conversion_actions.join(' + ')}`)
   }
   console.log('')
 }
@@ -162,14 +170,16 @@ async function connectFeed() {
     customer_name: target.name,
     currency_code: target.currencyCode,
     feed_label: flag('--feed-label') ?? null,
-    roas_conversion_action: flag('--roas') ?? null,
-    poas_conversion_action: flag('--poas') ?? null,
+    // Repeatable: --roas "A" --roas "B" sums both. flag() returns the first, so
+    // the raw argv is read here instead.
+    roas_conversion_actions: flagAll('--roas'),
+    poas_conversion_actions: flagAll('--poas'),
   })
 
   console.log(`\n✓ ${feed.name} → ${target.name} (${formatCustomerId(target.customerId)}, ${target.currencyCode})`)
   console.log(`  connection:  ${connection.id} (token stored encrypted)`)
-  console.log(`  ROAS action:   ${settings.roas_conversion_action ?? '(not selected)'}`)
-  console.log(`  POAS action:   ${settings.poas_conversion_action ?? '(not selected)'}`)
+  console.log(`  ROAS actions:  ${settings.roas_conversion_actions?.join(' + ') || '(not selected)'}`)
+  console.log(`  POAS actions:  ${settings.poas_conversion_actions?.join(' + ') || '(not selected)'}`)
   console.log(`  feed label:    ${settings.feed_label ?? '(none — whole account)'}`)
   console.log(`\nNow run:  npx tsx scripts/run-google-ads-sync.ts ${feedId}\n`)
 }

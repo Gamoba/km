@@ -36,9 +36,11 @@ export async function GET(
     // The metric definition travels with the request: the page can be showing a
     // different action than the feed's saved default, and expanded rows must
     // agree with the parent row they came from.
+    // Repeated params (?roas=A&roas=B) rather than a delimiter, because action
+    // names are free text and may contain whatever separator we picked.
     const variants = await getVariantPerformance(adminDb(), feedId, days, productRef, {
-      roas: url.searchParams.get('roas'),
-      poas: url.searchParams.get('poas'),
+      roas: url.searchParams.getAll('roas').filter(Boolean),
+      poas: url.searchParams.getAll('poas').filter(Boolean),
     })
     return NextResponse.json({ variants })
   } catch (err) {

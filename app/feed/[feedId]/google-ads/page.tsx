@@ -6,8 +6,10 @@ import { missingSetup } from '@/lib/googleAdsSync'
 import {
   getAvailableActions,
   getProductPerformance,
+  resolveActions,
   type Window,
 } from '@/lib/googleAdsAnalytics'
+import { getProductMargins, marginCoverage } from '@/lib/variantCosts'
 import { GoogleAdsClient } from './GoogleAdsClient'
 
 const WINDOWS: Window[] = [7, 14, 30, 90, 180, 365]
@@ -22,8 +24,10 @@ export default async function GoogleAdsPage({
     days?: string
     ga_connected?: string
     ga_error?: string
-    roas?: string
-    poas?: string
+    // Repeated params: ?roas=A&roas=B. Next hands those over as an array, and as
+    // a bare string when there is exactly one.
+    roas?: string | string[]
+    poas?: string | string[]
   }>
 }) {
   const { feedId } = await params
@@ -72,8 +76,8 @@ export default async function GoogleAdsPage({
                 customerName: null,
                 customerId: null,
                 currency: settings.currency_code,
-                roasAction: settings.roas_conversion_action,
-                poasAction: settings.poas_conversion_action,
+                roasActions: settings.roas_conversion_actions ?? [],
+                poasActions: settings.poas_conversion_actions ?? [],
                 lastSyncedAt: null,
                 lastSyncError: null,
                 feedLabel: settings.feed_label,
@@ -81,8 +85,10 @@ export default async function GoogleAdsPage({
             : null
         }
         availableActions={[]}
-        activeActions={{ roas: null, poas: null }}
+        activeActions={{ roas: [], poas: [] }}
         rows={[]}
+        margins={{}}
+        marginCoverage={{ withMargin: 0, products: 0 }}
         totals={null}
         from=""
         to=""
@@ -90,18 +96,22 @@ export default async function GoogleAdsPage({
     )
   }
 
-  // The chosen actions come from the URL when the user is switching definitions
-  // on the page, and fall back to the feed's saved default. Storing a default
-  // still matters — it's what a fresh visit, and the eventual bucket engine, use.
-  const actions = {
-    roas: roasParam ?? settings?.roas_conversion_action ?? null,
-    poas: poasParam ?? settings?.poas_conversion_action ?? null,
-  }
+  const actions = resolveActions({ roas: roasParam, poas: poasParam }, settings)
 
-  const [{ rows, totals, from, to }, availableActions] = await Promise.all([
+  const [{ rows, totals, from, to }, availableActions, margins] = await Promise.all([
     getProductPerformance(db, feedId, days, actions),
     getAvailableActions(db, feedId, days),
+    getProductMargins(db, feedId),
   ])
+
+  // Sent as a plain lookup rather than merged into the rows, so the analytics
+  // layer stays unaware that costs exist. Products with no cost are simply
+  // absent, and the client renders those as unknown rather than as zero margin.
+  const marginByRef: Record<string, { margin: number | null; coverage: number }> = {}
+  for (const [ref, m] of margins) {
+    marginByRef[ref] = { margin: m.margin, coverage: m.coverage }
+  }
+  const coverage = marginCoverage(margins)
 
   return (
     <GoogleAdsClient
@@ -118,8 +128,8 @@ export default async function GoogleAdsPage({
         customerName: settings?.customer_name ?? null,
         customerId: settings?.customer_id ?? null,
         currency: settings?.currency_code ?? null,
-        roasAction: settings?.roas_conversion_action ?? null,
-        poasAction: settings?.poas_conversion_action ?? null,
+        roasActions: settings?.roas_conversion_actions ?? [],
+        poasActions: settings?.poas_conversion_actions ?? [],
         lastSyncedAt: settings?.last_synced_at ?? null,
         lastSyncError: settings?.last_sync_error ?? null,
         feedLabel: settings?.feed_label ?? null,
@@ -127,6 +137,8 @@ export default async function GoogleAdsPage({
       availableActions={availableActions}
       activeActions={actions}
       rows={rows}
+      margins={marginByRef}
+      marginCoverage={{ withMargin: coverage.withMargin, products: coverage.products }}
       totals={totals}
       from={from}
       to={to}
