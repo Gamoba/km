@@ -64,7 +64,19 @@ export type Totals = RawTotals & Derived & { products: number; items: number }
 const ratio = (numerator: number, denominator: number): number | null =>
   denominator > 0 ? numerator / denominator : null
 
-export function derive(t: RawTotals): Derived {
+/**
+ * @param poasTracked Whether the feed actually has a gross-profit conversion
+ * action selected.
+ *
+ * It decides what a gross profit of ZERO means. With an action chosen, a
+ * product that took spend and returned no profit has a MEASURED profit of
+ * −cost: that is the single most actionable number in the account, and leaving
+ * it null hid it from every rule and every sort. With no action chosen, the
+ * same zero says nothing about the product — it says the account has not been
+ * told what profit is — so it stays null rather than painting the whole
+ * catalogue as pure loss.
+ */
+export function derive(t: RawTotals, poasTracked = false): Derived {
   return {
     roas: ratio(t.roas_value, t.cost),
     poas: ratio(t.poas_value, t.cost),
@@ -72,7 +84,8 @@ export function derive(t: RawTotals): Derived {
     cpc: ratio(t.cost, t.clicks),
     aov: ratio(t.roas_value, t.roas_conversions),
     margin: ratio(t.poas_value, t.roas_value),
-    profitAfterAdSpend: t.poas_value > 0 || t.poas_conversions > 0 ? t.poas_value - t.cost : null,
+    profitAfterAdSpend:
+      poasTracked || t.poas_value > 0 || t.poas_conversions > 0 ? t.poas_value - t.cost : null,
   }
 }
 
@@ -196,11 +209,13 @@ export async function getProductPerformance(
   })
   if (error) dbError('getProductPerformance', error)
 
+  const poasTracked = actions.poas.length > 0
+
   const rows: ProductRow[] = ((data ?? []) as Record<string, unknown>[]).map((r) => {
     const raw = rawFrom(r)
     return {
       ...raw,
-      ...derive(raw),
+      ...derive(raw, poasTracked),
       productRef: (r.product_ref as string | null) ?? null,
       title: (r.title as string | null) ?? null,
       handle: (r.handle as string | null) ?? null,
@@ -231,7 +246,7 @@ export async function getProductPerformance(
     rows,
     totals: {
       ...summed,
-      ...derive(summed),
+      ...derive(summed, poasTracked),
       products: rows.filter((r) => r.productRef).length,
       items: rows.reduce((n, r) => n + r.variantCount, 0),
     },
@@ -259,11 +274,13 @@ export async function getVariantPerformance(
   })
   if (error) dbError('getVariantPerformance', error)
 
+  const poasTracked = actions.poas.length > 0
+
   return ((data ?? []) as Record<string, unknown>[]).map((r) => {
     const raw = rawFrom(r)
     return {
       ...raw,
-      ...derive(raw),
+      ...derive(raw, poasTracked),
       itemId: String(r.item_id ?? ''),
       productRef: (r.product_ref as string | null) ?? null,
       variantRef: (r.variant_ref as string | null) ?? null,
@@ -276,6 +293,47 @@ export async function getVariantPerformance(
       price: (r.price as string | null) ?? null,
     }
   })
+}
+
+// ── Break-even ───────────────────────────────────────────────────────────────
+
+/**
+ * How much larger a REPORTED conversion value is than the net revenue behind it.
+ *
+ * 1 when the value is already net, 1 + rate/100 when it carries VAT. Null when
+ * nobody has answered — deliberately not defaulted here, because the caller is
+ * the only one that can decide whether to assume and warn or to show nothing at
+ * all. See migration 043.
+ */
+export function vatUplift(includesVat: boolean | null, rate: number | null): number | null {
+  if (includesVat === null || includesVat === undefined) return null
+  if (!includesVat) return 1
+  const n = Number(rate)
+  if (!Number.isFinite(n) || n < 0 || n >= 100) return null
+  return 1 + n / 100
+}
+
+/**
+ * The ROAS at which gross profit exactly covers ad cost.
+ *
+ * Gross profit is revenue × margin, so break-even is where revenue ÷ cost —
+ * ROAS — equals 1 ÷ margin. The uplift corrects for the two halves being quoted
+ * on different bases: the margin is net of VAT, while the ROAS numerator is
+ * whatever Google was told, which for a standard Shopify tracking setup is the
+ * gross order total.
+ *
+ * @param margin Net catalogue margin as a fraction. Must be the AUTHORITATIVE
+ * basis, never the as-entered one a display toggle might be showing: this
+ * number is compared against a real ROAS, so it cannot depend on how someone is
+ * currently looking at the table.
+ *
+ * Null for an unknown margin, and equally for a margin of zero or less — where
+ * no revenue multiple ever repays the spend, so no finite threshold exists.
+ * Callers that need to tell those apart should check the margin themselves.
+ */
+export function breakEvenRoas(margin: number | null, uplift = 1): number | null {
+  if (margin === null || margin <= 0) return null
+  return uplift / margin
 }
 
 export function formatMoney(v: number | null, currency: string | null): string {

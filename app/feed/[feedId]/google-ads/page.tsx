@@ -9,7 +9,9 @@ import {
   resolveActions,
   type Window,
 } from '@/lib/googleAdsAnalytics'
-import { getProductMargins, marginCoverage } from '@/lib/variantCosts'
+import { getProductMargins, marginCoverage, vatBasis } from '@/lib/variantCosts'
+import { getReturnsForFeed } from '@/lib/returnsAnalytics'
+import { getArchiveCoverage } from '@/lib/shopifyOrders'
 import { GoogleAdsClient } from './GoogleAdsClient'
 
 const WINDOWS: Window[] = [7, 14, 30, 90, 180, 365]
@@ -24,8 +26,6 @@ export default async function GoogleAdsPage({
     days?: string
     ga_connected?: string
     ga_error?: string
-    // Repeated params: ?roas=A&roas=B. Next hands those over as an array, and as
-    // a bare string when there is exactly one.
     roas?: string | string[]
     poas?: string | string[]
   }>
@@ -89,6 +89,9 @@ export default async function GoogleAdsPage({
         rows={[]}
         margins={{}}
         marginCoverage={{ withMargin: 0, products: 0 }}
+        returns={{}}
+        returnsContext={null}
+        vat={{ pricesIncludeVat: null, conversionValueIncludesVat: null, rate: null }}
         totals={null}
         from=""
         to=""
@@ -98,20 +101,37 @@ export default async function GoogleAdsPage({
 
   const actions = resolveActions({ roas: roasParam, poas: poasParam }, settings)
 
+  const vat = vatBasis(settings ?? {})
+
   const [{ rows, totals, from, to }, availableActions, margins] = await Promise.all([
     getProductPerformance(db, feedId, days, actions),
     getAvailableActions(db, feedId, days),
-    getProductMargins(db, feedId),
+    getProductMargins(db, feedId, vat),
   ])
 
-  // Sent as a plain lookup rather than merged into the rows, so the analytics
-  // layer stays unaware that costs exist. Products with no cost are simply
-  // absent, and the client renders those as unknown rather than as zero margin.
-  const marginByRef: Record<string, { margin: number | null; coverage: number }> = {}
+  const marginByRef: Record<
+    string,
+    { margin: number | null; asEntered: number | null; coverage: number }
+  > = {}
   for (const [ref, m] of margins) {
-    marginByRef[ref] = { margin: m.margin, coverage: m.coverage }
+    marginByRef[ref] = { margin: m.margin, asEntered: m.marginAsEntered, coverage: m.coverage }
   }
   const coverage = marginCoverage(margins)
+
+  const returns = await getReturnsForFeed(db, feedId, { from, to })
+  const archive = returns.projectId ? await getArchiveCoverage(db, returns.projectId) : null
+
+  const returnsByRef: Record<
+    string,
+    { returnRate: number | null; refundedInWindow: number; sampleUnits: number }
+  > = {}
+  for (const [ref, r] of returns.byProduct) {
+    returnsByRef[ref] = {
+      returnRate: r.returnRate,
+      refundedInWindow: r.refundedInWindow,
+      sampleUnits: r.sampleUnits,
+    }
+  }
 
   return (
     <GoogleAdsClient
@@ -139,6 +159,25 @@ export default async function GoogleAdsPage({
       rows={rows}
       margins={marginByRef}
       marginCoverage={{ withMargin: coverage.withMargin, products: coverage.products }}
+      returns={returnsByRef}
+      returnsContext={{
+        country: returns.country,
+        cohortFrom: returns.cohortFrom,
+        cohortTo: returns.cohortTo,
+        overallRate: returns.overall.returnRate,
+        overallSample: returns.overall.sampleUnits,
+        refundedInWindow: returns.overall.refundedInWindow,
+        returnedInWindow: returns.overall.windowReturnedValue,
+        otherRefundedInWindow: returns.overall.windowOtherRefundedValue,
+        archiveDepthDays: archive?.depthDays ?? null,
+        archiveLastRunAt: archive?.lastRunAt ?? null,
+        archiveHasGap: archive?.hasPermanentGap ?? true,
+      }}
+      vat={{
+        pricesIncludeVat: settings?.prices_include_vat ?? null,
+        conversionValueIncludesVat: settings?.conversion_value_includes_vat ?? null,
+        rate: settings?.vat_rate ?? null,
+      }}
       totals={totals}
       from={from}
       to={to}

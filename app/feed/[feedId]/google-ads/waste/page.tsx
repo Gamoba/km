@@ -11,25 +11,22 @@ import {
   resolveActions,
   type Window,
 } from '@/lib/googleAdsAnalytics'
-
-// Deliberately a server component: this is a report, not a tool. The window and
-// the metric definition already live in the URL, so there is no state left for
-// the client to hold and nothing here needs to re-render without a navigation.
+import { WasteTables, type WasteRow } from './WasteTables'
 
 const WINDOWS: Window[] = [7, 14, 30, 90, 180, 365]
 const DEFAULT_WINDOW: Window = 30
 
-// Enough rows to argue with, not so many that a large catalogue ships a novel to
-// the browser. The totals above the table are computed over ALL rows, so the cap
-// never changes the headline number — only how much of the tail is listed.
-const ROW_LIMIT = 200
 
 export default async function WastedSpendPage({
   params,
   searchParams,
 }: {
   params: Promise<{ feedId: string }>
-  searchParams: Promise<{ days?: string; roas?: string | string[]; poas?: string | string[] }>
+  searchParams: Promise<{
+    days?: string
+    roas?: string | string[]
+    poas?: string | string[]
+  }>
 }) {
   const { feedId } = await params
   const { days: daysParam, roas: roasParam, poas: poasParam } = await searchParams
@@ -46,13 +43,22 @@ export default async function WastedSpendPage({
   const parsed = Number(daysParam)
   const days: Window = WINDOWS.includes(parsed as Window) ? (parsed as Window) : DEFAULT_WINDOW
 
+  const asArray = (v?: string | string[]) => (v === undefined ? [] : Array.isArray(v) ? v : [v])
+  const hrefFor = (w: Window) => {
+    const p = new URLSearchParams()
+    p.set('days', String(w))
+    for (const v of asArray(roasParam)) p.append('roas', v)
+    for (const v of asArray(poasParam)) p.append('poas', v)
+    return `/feed/${feedId}/google-ads/waste?${p.toString()}`
+  }
+
   const db = adminDb()
   const settings = await getFeedSettings(db, feedId)
   const currency = settings?.currency_code ?? 'DKK'
 
   if (!settings?.customer_id) {
     return (
-      <Shell feedName={feed.name} feedId={feedId} days={days}>
+      <Shell feedName={feed.name} days={days} hrefFor={hrefFor}>
         <Empty
           title="Not connected to Google Ads"
           body="This report reads spend that Google has already attributed to your products, so the feed needs a connection and at least one sync first."
@@ -64,12 +70,9 @@ export default async function WastedSpendPage({
 
   const actions = resolveActions({ roas: roasParam, poas: poasParam }, settings)
 
-  // Without a revenue action every product reports zero conversions, so the whole
-  // catalogue would be listed as waste. Refusing to draw the table is the honest
-  // response — a confident list of wrong answers is worse than no list.
   if (!actions.roas.length) {
     return (
-      <Shell feedName={feed.name} feedId={feedId} days={days}>
+      <Shell feedName={feed.name} days={days} hrefFor={hrefFor}>
         <Empty
           title="No revenue conversion action is selected"
           body="Waste is spend that produced no revenue, so this report needs to know which conversion action counts as revenue. Without one, every product looks like it converted nothing."
@@ -81,31 +84,36 @@ export default async function WastedSpendPage({
 
   const { rows, totals, from, to } = await getProductPerformance(db, feedId, days, actions)
 
-  // Unmatched rows are spend whose item id could not be traced back to a product.
-  // It is not waste — we simply cannot say what it bought — so it is reported
-  // separately rather than padding the total.
   const matched = rows.filter((r) => !r.unmatched)
   const unmatchedCost = rows.filter((r) => r.unmatched).reduce((n, r) => n + r.cost, 0)
 
-  // Counts are genuinely zero for an untrafficked product, so `=== 0` is a fact
-  // here and not the null-vs-zero trap that shapes the bucket engine.
   const wasted = matched
     .filter((r) => r.cost > 0 && r.roas_conversions === 0)
     .sort((a, b) => b.cost - a.cost)
 
   const wastedCost = wasted.reduce((n, r) => n + r.cost, 0)
 
-  // Converts, but the gross profit does not cover the ad spend. profitAfterAdSpend
-  // is null when no profit action reported on the product, which keeps "we cannot
-  // judge this" out of a list headed "losing money".
   const losing = matched
     .filter((r) => r.roas_conversions > 0 && r.profitAfterAdSpend !== null && r.profitAfterAdSpend < 0)
     .sort((a, b) => (a.profitAfterAdSpend ?? 0) - (b.profitAfterAdSpend ?? 0))
 
   const losingCost = losing.reduce((n, r) => n + (r.profitAfterAdSpend ?? 0), 0)
 
+  const toRow = (r: (typeof rows)[number]): WasteRow => ({
+    productRef: r.productRef,
+    title: r.title,
+    handle: r.handle,
+    vendor: r.vendor,
+    productType: r.productType,
+    impressions: r.impressions,
+    clicks: r.clicks,
+    cost: r.cost,
+    poasValue: r.poas_value,
+    profitAfterAdSpend: r.profitAfterAdSpend,
+  })
+
   return (
-    <Shell feedName={feed.name} feedId={feedId} days={days}>
+    <Shell feedName={feed.name} days={days} hrefFor={hrefFor}>
       {/* ── What the numbers mean ─────────────────────────────────── */}
       <div className="wl-card" style={{ padding: '14px 18px' }}>
         <div className="flex items-start justify-between gap-4 flex-wrap">
@@ -139,51 +147,22 @@ export default async function WastedSpendPage({
         <Stat label="Total spend" value={formatMoney(totals.cost, currency)} />
       </section>
 
-      {/* ── Spend with nothing to show ────────────────────────────── */}
-      {wasted.length === 0 ? (
-        <Empty
-          title="Every product with spend produced revenue"
-          body={`Nothing in the last ${days} days took budget without returning anything. Widen the window if you want to look further back.`}
-        />
-      ) : (
-        <Table
-          title="Spend with no revenue"
-          note={`${days} days · sorted by spend`}
-          head={['Product', 'Impressions', 'Clicks', 'Cost', 'Share']}
-          shown={Math.min(wasted.length, ROW_LIMIT)}
-          total={wasted.length}
-        >
-          {wasted.slice(0, ROW_LIMIT).map((r) => (
-            <tr key={r.productRef} style={{ borderBottom: '0.5px solid var(--hairline)' }}>
-              <Td left>{r.title ?? r.productRef}</Td>
-              <Td>{formatInt(r.impressions)}</Td>
-              <Td>{formatInt(r.clicks)}</Td>
-              <Td strong>{formatMoney(r.cost, currency)}</Td>
-              <Td muted>{wastedCost > 0 ? formatPercent(r.cost / wastedCost, 0) : '—'}</Td>
-            </tr>
-          ))}
-        </Table>
-      )}
-
-      {/* ── Converting, and still underwater ──────────────────────── */}
-      {actions.poas.length > 0 && losing.length > 0 && (
-        <Table
-          title="Converting, but losing money"
-          note={`Gross profit below ad spend · ${formatMoney(losingCost, currency)} in total`}
-          head={['Product', 'Cost', 'Gross profit', 'Profit − cost']}
-          shown={Math.min(losing.length, ROW_LIMIT)}
-          total={losing.length}
-        >
-          {losing.slice(0, ROW_LIMIT).map((r) => (
-            <tr key={r.productRef} style={{ borderBottom: '0.5px solid var(--hairline)' }}>
-              <Td left>{r.title ?? r.productRef}</Td>
-              <Td>{formatMoney(r.cost, currency)}</Td>
-              <Td>{formatMoney(r.poas_value, currency)}</Td>
-              <Td strong tone="bad">{formatMoney(r.profitAfterAdSpend, currency)}</Td>
-            </tr>
-          ))}
-        </Table>
-      )}
+      {/* ── The two lists, and the search over them ─────────── */}
+      <WasteTables
+        days={days}
+        currency={currency}
+        wasted={wasted.map(toRow)}
+        wastedCost={wastedCost}
+        losing={losing.map(toRow)}
+        losingCost={losingCost}
+        showLosing={actions.poas.length > 0}
+        wastedEmpty={
+          <Empty
+            title="Every product with spend produced revenue"
+            body={`Nothing in the last ${days} days took budget without returning anything. Widen the window if you want to look further back.`}
+          />
+        }
+      />
 
       {/* ── Footnotes that stop the numbers being misread ─────────── */}
       <div className="space-y-1.5" style={{ fontSize: '12px', color: 'var(--ink-muted)' }}>
@@ -218,13 +197,13 @@ export default async function WastedSpendPage({
 
 function Shell({
   feedName,
-  feedId,
   days,
+  hrefFor,
   children,
 }: {
   feedName: string
-  feedId: string
   days: Window
+  hrefFor: (w: Window) => string
   children: React.ReactNode
 }) {
   return (
@@ -249,7 +228,7 @@ function Shell({
             {WINDOWS.map((w) => (
               <Link
                 key={w}
-                href={`/feed/${feedId}/google-ads/waste?days=${w}`}
+                href={hrefFor(w)}
                 className="wl-pill"
                 style={{
                   background: w === days ? 'var(--accent-purple)' : 'transparent',
@@ -293,98 +272,6 @@ function Stat({
         {value}
       </div>
     </div>
-  )
-}
-
-function Table({
-  title,
-  note,
-  head,
-  shown,
-  total,
-  children,
-}: {
-  title: string
-  note: string
-  head: string[]
-  shown: number
-  total: number
-  children: React.ReactNode
-}) {
-  return (
-    <section className="wl-card" style={{ padding: 0, overflow: 'hidden' }}>
-      <div
-        className="flex items-baseline justify-between gap-3 flex-wrap"
-        style={{ padding: '14px 18px', borderBottom: '1px solid var(--hairline)' }}
-      >
-        <h2 style={{ fontSize: '18px', fontWeight: 500, color: 'var(--ink)' }}>{title}</h2>
-        <span style={{ fontSize: '12px', color: 'var(--ink-muted)' }}>{note}</span>
-      </div>
-      <div style={{ overflowX: 'auto' }}>
-        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
-          <thead>
-            <tr style={{ borderBottom: '1px solid var(--hairline)' }}>
-              {head.map((h, i) => (
-                <th
-                  key={h}
-                  style={{
-                    padding: '9px 12px',
-                    textAlign: i === 0 ? 'left' : 'right',
-                    paddingLeft: i === 0 ? '18px' : '12px',
-                    paddingRight: i === head.length - 1 ? '18px' : '12px',
-                    fontSize: '11px',
-                    fontWeight: 400,
-                    textTransform: 'uppercase',
-                    letterSpacing: '0.08em',
-                    color: 'var(--ink-muted)',
-                    whiteSpace: 'nowrap',
-                  }}
-                >
-                  {h}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>{children}</tbody>
-        </table>
-      </div>
-      {total > shown && (
-        <p style={{ fontSize: '11px', color: 'var(--ink-muted)', padding: '10px 18px' }}>
-          Showing the {shown} largest of {total}. The totals above cover all of them.
-        </p>
-      )}
-    </section>
-  )
-}
-
-function Td({
-  children,
-  left,
-  strong,
-  muted,
-  tone,
-}: {
-  children: React.ReactNode
-  left?: boolean
-  strong?: boolean
-  muted?: boolean
-  tone?: 'bad'
-}) {
-  return (
-    <td
-      style={{
-        padding: '9px 12px',
-        paddingLeft: left ? '18px' : '12px',
-        textAlign: left ? 'left' : 'right',
-        whiteSpace: left ? 'normal' : 'nowrap',
-        fontVariantNumeric: left ? undefined : 'tabular-nums',
-        fontWeight: strong ? 500 : 400,
-        color: tone === 'bad' ? 'var(--accent-red)' : muted ? 'var(--ink-muted)' : 'var(--ink)',
-        maxWidth: left ? '340px' : undefined,
-      }}
-    >
-      {children}
-    </td>
   )
 }
 

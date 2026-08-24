@@ -13,6 +13,26 @@ function parseGid(gid: string): number {
   return match ? parseInt(match[1], 10) : 0
 }
 
+// The order archive keeps ids as TEXT, matching product_ref / variant_ref in the
+// rest of the schema, so a gid becomes the trailing number as a string rather
+// than going through parseGid's number (which turns an unparseable id into 0 —
+// a valid-looking key that silently collides).
+function refOf(gid: string): string {
+  const match = gid.match(/\/(\d+)$/)
+  return match ? match[1] : gid
+}
+
+function optionalRef(gid: string | null | undefined): string | null {
+  return gid ? refOf(gid) : null
+}
+
+/** Shopify money as a number, or null. An absent amount is not 0.00. */
+function toAmount(raw: string | null | undefined): number | null {
+  if (raw === null || raw === undefined || raw === '') return null
+  const n = Number(raw)
+  return Number.isFinite(n) ? n : null
+}
+
 // ─── Types ───────────────────────────────────────────────────────────────────
 
 export type ShopifyMetafield = {
@@ -213,6 +233,116 @@ export type VariantCost = {
   currency: string | null
 }
 
+// ── Orders, refunds, returns ────────────────────────────────────────────────
+//
+// Shaped to be STORED, not rendered: these types mirror the columns in
+// migration 041 rather than the screens that read them. The reason is the
+// 60-day visibility ceiling — see that migration's header. Anything not
+// captured on the first pass is unrecoverable once an order ages out, so the
+// mapping below keeps every field the API offers on these objects, including
+// ones no current feature reads.
+//
+// Money is carried in both bases throughout. `null` where Shopify returned
+// nothing; never coerced to 0, because a missing amount and a zero amount are
+// different claims about an order.
+
+export type Money = {
+  shop: number | null
+  presentment: number | null
+}
+
+export type ShopifyOrderLineItem = {
+  lineItemRef: string
+  /** Null when the product has been deleted from Shopify since the sale. */
+  productRef: string | null
+  variantRef: string | null
+  sku: string | null
+  title: string | null
+  variantTitle: string | null
+  quantity: number
+  price: Money
+  totalDiscount: Money
+}
+
+export type ShopifyRefundLineItem = {
+  refundLineRef: string
+  lineItemRef: string | null
+  productRef: string | null
+  variantRef: string | null
+  quantity: number
+  subtotal: Money
+  totalTax: Money
+  /** RETURN | CANCEL | LEGACY_RESTOCK | NO_RESTOCK | null */
+  restockType: string | null
+}
+
+export type ShopifyRefund = {
+  refundRef: string
+  createdAt: string
+  processedAt: string | null
+  /**
+   * Null when no return is attached — a cancellation, a goodwill refund, a
+   * price match. Keeping this nullable is what lets return-driven losses be
+   * counted apart from refunds in general.
+   */
+  returnRef: string | null
+  note: string | null
+  totalRefunded: Money
+  lineItems: ShopifyRefundLineItem[]
+}
+
+export type ShopifyReturnLineItem = {
+  returnLineRef: string
+  lineItemRef: string | null
+  productRef: string | null
+  variantRef: string | null
+  quantity: number
+  /** SIZE_TOO_SMALL | NOT_AS_DESCRIBED | DEFECTIVE | … | null */
+  returnReason: string | null
+  returnReasonNote: string | null
+}
+
+export type ShopifyReturn = {
+  returnRef: string
+  name: string | null
+  /** OPEN | CLOSED | DECLINED | REQUESTED | CANCELED */
+  status: string | null
+  createdAt: string | null
+  closedAt: string | null
+  totalQuantity: number
+  lineItems: ShopifyReturnLineItem[]
+}
+
+export type ShopifyOrder = {
+  orderRef: string
+  name: string | null
+  createdAt: string
+  updatedAt: string
+  processedAt: string | null
+  cancelledAt: string | null
+  /** Shipping country, falling back to billing. Null on orders with neither. */
+  countryCode: string | null
+  shopCurrency: string | null
+  presentmentCurrency: string | null
+  totalPrice: Money
+  subtotalPrice: Money
+  totalTax: Money
+  totalDiscounts: Money
+  totalRefunded: Money
+  financialStatus: string | null
+  fulfillmentStatus: string | null
+  test: boolean
+  lineItems: ShopifyOrderLineItem[]
+  refunds: ShopifyRefund[]
+  returns: ShopifyReturn[]
+}
+
+export type OrderFetchPage = {
+  orders: ShopifyOrder[]
+  hasNextPage: boolean
+  endCursor: string | null
+}
+
 type ShopLocaleGql = { locale: string; name: string; primary: boolean }
 
 // As of Admin API 2025-04+, MarketWebPresence.rootUrl was replaced with rootUrls
@@ -263,6 +393,201 @@ const MARKETS_QUERY = `{
     }
   }
 }`
+
+// One page of orders with everything hanging off them.
+//
+// ── WHY ASCENDING BY updated_at ────────────────────────────────────────────
+// The sync advances a watermark. Walking oldest-first means a run that dies
+// halfway has still durably stored a contiguous prefix, and the watermark can
+// be moved to the last order actually written. Newest-first would leave a hole
+// in the middle that nothing later would ever revisit.
+//
+// ── WHY THE PAGE IS SMALL ──────────────────────────────────────────────────
+// Cost, not politeness. Each order drags up to 50 line items, its refunds with
+// their own lines, and its returns with theirs, so a page of 10 already
+// approaches Shopify's per-query cost ceiling. shopifyGraphQL backs off on
+// THROTTLED, but a query whose SINGLE cost exceeds the bucket can never
+// succeed at any pace.
+//
+// ── LIMITS ARE DELIBERATE, NOT DEFAULTS ────────────────────────────────────
+// An order with more than 50 distinct line items is a wholesale order, not the
+// ecommerce case this measures, and truncating its tail costs a rounding error
+// on a return rate. The sync counts what it truncated rather than pretending
+// otherwise (see lib/shopifyOrders.ts).
+const ORDERS_QUERY = `query Orders($first: Int!, $after: String, $q: String!) {
+  orders(first: $first, after: $after, query: $q, sortKey: UPDATED_AT, reverse: false) {
+    pageInfo { hasNextPage endCursor }
+    nodes {
+      id
+      name
+      createdAt
+      updatedAt
+      processedAt
+      cancelledAt
+      test
+      displayFinancialStatus
+      displayFulfillmentStatus
+      currencyCode
+      presentmentCurrencyCode
+      shippingAddress { countryCodeV2 }
+      billingAddress { countryCodeV2 }
+      totalPriceSet { shopMoney { amount } presentmentMoney { amount } }
+      subtotalPriceSet { shopMoney { amount } presentmentMoney { amount } }
+      totalTaxSet { shopMoney { amount } presentmentMoney { amount } }
+      totalDiscountsSet { shopMoney { amount } presentmentMoney { amount } }
+      totalRefundedSet { shopMoney { amount } presentmentMoney { amount } }
+      lineItems(first: 50) {
+        nodes {
+          id
+          sku
+          title
+          variantTitle
+          quantity
+          product { id }
+          variant { id }
+          originalUnitPriceSet { shopMoney { amount } presentmentMoney { amount } }
+          totalDiscountSet { shopMoney { amount } presentmentMoney { amount } }
+        }
+      }
+      refunds {
+        id
+        createdAt
+        note
+        totalRefundedSet { shopMoney { amount } presentmentMoney { amount } }
+        return { id }
+        refundLineItems(first: 50) {
+          nodes {
+            quantity
+            restockType
+            subtotalSet { shopMoney { amount } presentmentMoney { amount } }
+            totalTaxSet { shopMoney { amount } presentmentMoney { amount } }
+            lineItem {
+              id
+              product { id }
+              variant { id }
+            }
+          }
+        }
+      }
+      returns(first: 10) {
+        nodes {
+          id
+          name
+          status
+          totalQuantity
+          createdAt
+          closedAt
+          returnLineItems(first: 50) {
+            nodes {
+              ... on ReturnLineItem {
+                id
+                quantity
+                returnReason
+                returnReasonNote
+                fulfillmentLineItem {
+                  lineItem {
+                    id
+                    product { id }
+                    variant { id }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}`
+
+type MoneySetGql = {
+  shopMoney?: { amount?: string | null } | null
+  presentmentMoney?: { amount?: string | null } | null
+} | null
+
+type OrdersResponse = {
+  orders: {
+    pageInfo: { hasNextPage: boolean; endCursor: string | null }
+    nodes: Array<{
+      id: string
+      name?: string | null
+      createdAt: string
+      updatedAt: string
+      processedAt?: string | null
+      cancelledAt?: string | null
+      test?: boolean | null
+      displayFinancialStatus?: string | null
+      displayFulfillmentStatus?: string | null
+      currencyCode?: string | null
+      presentmentCurrencyCode?: string | null
+      shippingAddress?: { countryCodeV2?: string | null } | null
+      billingAddress?: { countryCodeV2?: string | null } | null
+      totalPriceSet?: MoneySetGql
+      subtotalPriceSet?: MoneySetGql
+      totalTaxSet?: MoneySetGql
+      totalDiscountsSet?: MoneySetGql
+      totalRefundedSet?: MoneySetGql
+      lineItems: {
+        nodes: Array<{
+          id: string
+          sku?: string | null
+          title?: string | null
+          variantTitle?: string | null
+          quantity?: number | null
+          product?: { id?: string | null } | null
+          variant?: { id?: string | null } | null
+          originalUnitPriceSet?: MoneySetGql
+          totalDiscountSet?: MoneySetGql
+        }>
+      }
+      refunds: Array<{
+        id: string
+        createdAt: string
+        note?: string | null
+        totalRefundedSet?: MoneySetGql
+        return?: { id?: string | null } | null
+        refundLineItems: {
+          nodes: Array<{
+            quantity?: number | null
+            restockType?: string | null
+            subtotalSet?: MoneySetGql
+            totalTaxSet?: MoneySetGql
+            lineItem?: {
+              id?: string | null
+              product?: { id?: string | null } | null
+              variant?: { id?: string | null } | null
+            } | null
+          }>
+        }
+      }>
+      returns: {
+        nodes: Array<{
+          id: string
+          name?: string | null
+          status?: string | null
+          totalQuantity?: number | null
+          createdAt?: string | null
+          closedAt?: string | null
+          returnLineItems: {
+            nodes: Array<{
+              id?: string | null
+              quantity?: number | null
+              returnReason?: string | null
+              returnReasonNote?: string | null
+              fulfillmentLineItem?: {
+                lineItem?: {
+                  id?: string | null
+                  product?: { id?: string | null } | null
+                  variant?: { id?: string | null } | null
+                } | null
+              } | null
+            }>
+          }
+        }>
+      }
+    }>
+  }
+}
 
 // ── Response types (localized fetch) ───────────────────────────────────────────
 
@@ -315,6 +640,16 @@ export type ShopifyClient = {
   fetchMarkets: () => Promise<ShopifyMarket[]>
   /** Per-variant "Cost per item". Absent cost stays null, never 0. */
   fetchVariantCostsBulk: (productIds: number[]) => Promise<VariantCost[]>
+  /**
+   * One page of orders updated at or after `updatedAtMin`, oldest first, with
+   * their line items, refunds and returns. The caller pages and persists —
+   * see the note on the implementation.
+   */
+  fetchOrdersPage: (
+    updatedAtMin: string,
+    cursor?: string | null,
+    pageSize?: number
+  ) => Promise<OrderFetchPage>
   probeShopifyAccess: () => Promise<{
     httpStatus: number
     grantedScopesHeader: string | null
@@ -1102,11 +1437,127 @@ export function createShopifyClient({ shopUrl, accessToken }: ShopifyCredentials
     return { products: finalProducts }
   }
 
+  // ── Orders ────────────────────────────────────────────────────────────────
+
+  /**
+   * One page of orders updated at or after `updatedAtMin`, oldest first.
+   *
+   * Paging is the CALLER's job, not this function's, and deliberately so.
+   * Every other fetcher here loops internally and returns everything, which is
+   * safe when a failure halfway just means retrying a cheap read. Orders are
+   * different: the data is perishable (migration 041), so the caller has to be
+   * able to persist each page and advance its watermark before asking for the
+   * next one. A function that swallowed 40 pages and then threw would lose all
+   * 40.
+   */
+  async function fetchOrdersPage(
+    updatedAtMin: string,
+    cursor: string | null = null,
+    pageSize = 10
+  ): Promise<OrderFetchPage> {
+    const money = (set: MoneySetGql | undefined): Money => ({
+      shop: toAmount(set?.shopMoney?.amount),
+      presentment: toAmount(set?.presentmentMoney?.amount),
+    })
+
+    const data = await shopifyGraphQL<OrdersResponse>(ORDERS_QUERY, {
+      first: Math.max(1, Math.min(pageSize, 50)),
+      after: cursor,
+      // Shopify's search syntax. The quoting matters: an unquoted timestamp is
+      // parsed as a bare token and silently matches nothing.
+      q: `updated_at:>='${updatedAtMin}'`,
+    })
+
+    const orders: ShopifyOrder[] = data.orders.nodes.map((o) => ({
+      orderRef: refOf(o.id),
+      name: o.name ?? null,
+      createdAt: o.createdAt,
+      updatedAt: o.updatedAt,
+      processedAt: o.processedAt ?? null,
+      cancelledAt: o.cancelledAt ?? null,
+      // Shipping first: it is where the goods went, which is the market that
+      // sold them. Billing is the fallback for digital orders with no shipping
+      // address at all.
+      countryCode:
+        o.shippingAddress?.countryCodeV2 ?? o.billingAddress?.countryCodeV2 ?? null,
+      shopCurrency: o.currencyCode ?? null,
+      presentmentCurrency: o.presentmentCurrencyCode ?? null,
+      totalPrice: money(o.totalPriceSet),
+      subtotalPrice: money(o.subtotalPriceSet),
+      totalTax: money(o.totalTaxSet),
+      totalDiscounts: money(o.totalDiscountsSet),
+      totalRefunded: money(o.totalRefundedSet),
+      financialStatus: o.displayFinancialStatus ?? null,
+      fulfillmentStatus: o.displayFulfillmentStatus ?? null,
+      test: o.test === true,
+
+      lineItems: o.lineItems.nodes.map((li) => ({
+        lineItemRef: refOf(li.id),
+        productRef: optionalRef(li.product?.id),
+        variantRef: optionalRef(li.variant?.id),
+        sku: li.sku ?? null,
+        title: li.title ?? null,
+        variantTitle: li.variantTitle ?? null,
+        quantity: li.quantity ?? 0,
+        price: money(li.originalUnitPriceSet),
+        totalDiscount: money(li.totalDiscountSet),
+      })),
+
+      refunds: (o.refunds ?? []).map((r) => ({
+        refundRef: refOf(r.id),
+        createdAt: r.createdAt,
+        processedAt: null,
+        returnRef: optionalRef(r.return?.id),
+        note: r.note ?? null,
+        totalRefunded: money(r.totalRefundedSet),
+        lineItems: r.refundLineItems.nodes.map((rli, i) => ({
+          // RefundLineItem exposes no id of its own, so one is synthesised from
+          // the refund and the line it refunds. Position is the tiebreaker for
+          // the case Shopify permits but ecommerce rarely produces: the same
+          // line refunded twice within one refund.
+          refundLineRef: `${refOf(r.id)}:${optionalRef(rli.lineItem?.id) ?? 'x'}:${i}`,
+          lineItemRef: optionalRef(rli.lineItem?.id),
+          productRef: optionalRef(rli.lineItem?.product?.id),
+          variantRef: optionalRef(rli.lineItem?.variant?.id),
+          quantity: rli.quantity ?? 0,
+          subtotal: money(rli.subtotalSet),
+          totalTax: money(rli.totalTaxSet),
+          restockType: rli.restockType ?? null,
+        })),
+      })),
+
+      returns: (o.returns?.nodes ?? []).map((ret) => ({
+        returnRef: refOf(ret.id),
+        name: ret.name ?? null,
+        status: ret.status ?? null,
+        createdAt: ret.createdAt ?? null,
+        closedAt: ret.closedAt ?? null,
+        totalQuantity: ret.totalQuantity ?? 0,
+        lineItems: ret.returnLineItems.nodes.map((rli, i) => ({
+          returnLineRef: rli.id ? refOf(rli.id) : `${refOf(ret.id)}:${i}`,
+          lineItemRef: optionalRef(rli.fulfillmentLineItem?.lineItem?.id),
+          productRef: optionalRef(rli.fulfillmentLineItem?.lineItem?.product?.id),
+          variantRef: optionalRef(rli.fulfillmentLineItem?.lineItem?.variant?.id),
+          quantity: rli.quantity ?? 0,
+          returnReason: rli.returnReason ?? null,
+          returnReasonNote: rli.returnReasonNote ?? null,
+        })),
+      })),
+    }))
+
+    return {
+      orders,
+      hasNextPage: data.orders.pageInfo.hasNextPage,
+      endCursor: data.orders.pageInfo.endCursor,
+    }
+  }
+
   return {
     fetchProductsWithAllData,
     fetchProductsLocalized,
     fetchMarkets,
     fetchVariantCostsBulk,
+    fetchOrdersPage,
     probeShopifyAccess,
   }
 }

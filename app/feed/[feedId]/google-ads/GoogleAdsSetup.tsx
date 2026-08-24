@@ -14,7 +14,6 @@ type Account = {
 
 type Props = {
   feedId: string
-  /** A grant exists — we're past consent and picking an account. */
   hasConnection: boolean
   current: {
     customerId: string | null
@@ -28,11 +27,6 @@ type Props = {
 const fmtId = (id: string) =>
   id.length === 10 ? `${id.slice(0, 3)}-${id.slice(3, 6)}-${id.slice(6)}` : id
 
-// Setup asks for ONE thing: which account. It deliberately does not ask which
-// conversion action means revenue or profit — at this point no data has been
-// pulled, so that choice would be made blind. Every action is synced, and the
-// choice is made on the page afterwards, where each option is shown with the
-// amount it actually reports.
 export function GoogleAdsSetup({ feedId, hasConnection, current, onDone }: Props) {
   const router = useRouter()
   const [accounts, setAccounts] = useState<Account[] | null>(null)
@@ -44,8 +38,6 @@ export function GoogleAdsSetup({ feedId, hasConnection, current, onDone }: Props
 
   const selected = accounts?.find((a) => a.customerId === customerId) ?? null
 
-  // Derived, not stored: a loading flag set synchronously inside an effect
-  // triggers a cascading render and can drift out of sync with the data.
   const loadingAccounts = hasConnection && accounts === null && !failed
 
   useEffect(() => {
@@ -85,8 +77,6 @@ export function GoogleAdsSetup({ feedId, hasConnection, current, onDone }: Props
           currencyCode: selected.currencyCode,
           loginCustomerId: selected.viaManager,
           feedLabel: feedLabel || null,
-          // Preserved rather than cleared: re-running setup shouldn't silently
-          // reset a metric definition the user already settled on.
           roasConversionActions: current.roasActions,
           poasConversionActions: current.poasActions,
           syncNow: true,

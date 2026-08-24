@@ -1,7 +1,8 @@
 import { NextResponse } from 'next/server'
 import { createSupabaseServerClient } from '@/lib/supabase-server'
 import { adminDb, getOwnedFeed } from '@/lib/feeds'
-import { getVariantPerformance } from '@/lib/googleAdsAnalytics'
+import { getVariantPerformance, windowRange } from '@/lib/googleAdsAnalytics'
+import { getReturnsForFeed } from '@/lib/returnsAnalytics'
 import { errorResponse } from '@/lib/errors'
 
 // GET — variant-level rows for one product, loaded when a row is expanded.
@@ -38,11 +39,38 @@ export async function GET(
     // agree with the parent row they came from.
     // Repeated params (?roas=A&roas=B) rather than a delimiter, because action
     // names are free text and may contain whatever separator we picked.
-    const variants = await getVariantPerformance(adminDb(), feedId, days, productRef, {
+    const db = adminDb()
+    const variants = await getVariantPerformance(db, feedId, days, productRef, {
       roas: url.searchParams.getAll('roas').filter(Boolean),
       poas: url.searchParams.getAll('poas').filter(Boolean),
     })
-    return NextResponse.json({ variants })
+
+    // Returns ride along rather than being fetched separately by the client:
+    // the drill-down must measure the same market and the same cohort as the
+    // product row it opened from, and getReturnsForFeed is what guarantees it.
+    //
+    // Sent as a lookup keyed by variant_ref, mirroring how the product table
+    // receives its own. A variant missing from it has an unknown return rate,
+    // which is not a rate of zero.
+    const { from, to } = windowRange(days)
+    const returns = await getReturnsForFeed(db, feedId, { from, to })
+
+    const returnsByVariant: Record<
+      string,
+      { returnRate: number | null; refundedInWindow: number; sampleUnits: number }
+    > = {}
+    for (const v of variants) {
+      if (!v.variantRef) continue
+      const r = returns.byVariant.get(v.variantRef)
+      if (!r) continue
+      returnsByVariant[v.variantRef] = {
+        returnRate: r.returnRate,
+        refundedInWindow: r.refundedInWindow,
+        sampleUnits: r.sampleUnits,
+      }
+    }
+
+    return NextResponse.json({ variants, returns: returnsByVariant })
   } catch (err) {
     return errorResponse(err, 'GET /api/google-ads/[feedId]/variants')
   }

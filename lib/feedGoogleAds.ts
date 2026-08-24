@@ -37,21 +37,48 @@ export type GoogleAdsFeedSettings = {
   poas_conversion_actions: string[]
   id_pattern: 'auto' | IdPattern
   id_pattern_country: string | null
+  /**
+   * Whether products.variants[].price carries VAT. NULL means nobody has said,
+   * which is not the same as FALSE — see migration 040. Read by
+   * getProductMargins to put price and cost on the same basis.
+   */
+  prices_include_vat: boolean | null
+  /**
+   * Whether the value Google reports for the chosen revenue action carries VAT.
+   * Independent of prices_include_vat — a shop can hold net prices and still
+   * report a gross order total — and NULL is again "unanswered", not FALSE.
+   * Read with vat_rate to put reported revenue on the same basis as the net
+   * margin before deriving break-even ROAS. See migration 043.
+   */
+  conversion_value_includes_vat: boolean | null
+  /**
+   * Percent (25, not 0.25). One rate serves both bases, because the rate is a
+   * property of the market rather than of either basis. NULL when unknown or
+   * when neither prices nor conversion values carry VAT.
+   */
+  vat_rate: number | null
   sync_window_days: number
   last_synced_at: string | null
   last_sync_error: string | null
-  // Bucket-set configuration (migration 035). The level and window belong to the
-  // whole set, not to individual buckets — see the migration for why.
-  bucket_level: 'product' | 'variant'
-  bucket_window_days: number
-  buckets_computed_at: string | null
+  /**
+   * Last write of any kind to this row. Read by the custom-label page to tell
+   * that the settings moved after a label was computed — and since a sync
+   * stamps last_synced_at and updated_at with the same value, anything later
+   * than last_synced_at is a settings edit rather than a sync.
+   *
+   * Bucket configuration used to live here too (migration 035). It moved onto
+   * google_ads_custom_labels in 039: level and window are properties of a
+   * dimension, and forcing every dimension to share one made all but one of
+   * them wrong.
+   */
+  updated_at: string | null
 }
 
 const SETTINGS_COLUMNS =
   'id, feed_id, connection_id, customer_id, customer_name, currency_code, feed_label, ' +
   'roas_conversion_actions, poas_conversion_actions, id_pattern, id_pattern_country, ' +
-  'sync_window_days, last_synced_at, last_sync_error, ' +
-  'bucket_level, bucket_window_days, buckets_computed_at'
+  'prices_include_vat, conversion_value_includes_vat, vat_rate, ' +
+  'sync_window_days, last_synced_at, last_sync_error, updated_at'
 
 // ── Connections ──────────────────────────────────────────────────────────────
 

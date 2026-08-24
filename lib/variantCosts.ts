@@ -98,15 +98,37 @@ export async function syncVariantCosts(
 
 // ── Margins ──────────────────────────────────────────────────────────────────
 
+/**
+ * What basis the prices are on, so cost can be compared against like.
+ *
+ * Shopify stores one price per variant and the shop decides whether it carries
+ * VAT; "Cost per item" is what a supplier invoiced, which is net. Netting the
+ * price down is the only way the subtraction means anything. Null = nobody has
+ * told us yet, and we do not guess — see migration 040.
+ */
+export type VatBasis = { pricesIncludeVat: boolean; rate: number } | null
+
 export type ProductMargin = {
   productRef: string
   variantsTotal: number
   variantsCosted: number
   priceSum: number
   costSum: number
-  /** (price − cost) ÷ price over the costed variants. Null when nothing is known. */
+  /**
+   * The margin, on a basis comparable with cost: (net price − cost) ÷ net price
+   * over the costed variants. Null when nothing is known.
+   *
+   * This is the authoritative one — rules and the custom-label engine use it —
+   * so it never depends on who has which display toggle ticked.
+   */
   margin: number | null
-  /** Gross profit per unit at list price, summed over the costed variants. */
+  /**
+   * The same figure on the prices exactly as Shopify stores them. Equal to
+   * `margin` unless VAT is configured and non-zero. Kept only so the UI can
+   * reconcile against what a merchant sees in Shopify; never used for rules.
+   */
+  marginAsEntered: number | null
+  /** Gross profit per unit at net list price, summed over the costed variants. */
   unitProfit: number | null
   /** How much of the product the margin actually covers, 0–1. */
   coverage: number
@@ -119,10 +141,17 @@ const num = (v: unknown): number => {
 
 export async function getProductMargins(
   db: SupabaseClient,
-  feedId: string
+  feedId: string,
+  vat: VatBasis = null
 ): Promise<Map<string, ProductMargin>> {
   const { data, error } = await db.rpc('product_cost_summary', { p_feed_id: feedId })
   if (error) dbError('getProductMargins', error)
+
+  // Netting the SUM is the same as netting each price and summing: division by
+  // (1 + rate) is linear, and every variant in the sum shares one rate. So the
+  // SQL keeps returning raw sums, and the arithmetic stays in TypeScript with
+  // the rest of the ratios — the rule migration 032 set and 038 repeated.
+  const divisor = vat?.pricesIncludeVat && vat.rate > 0 ? 1 + vat.rate / 100 : 1
 
   const out = new Map<string, ProductMargin>()
   for (const r of (data ?? []) as Record<string, unknown>[]) {
@@ -133,6 +162,7 @@ export async function getProductMargins(
     const variantsCosted = num(r.variants_costed)
     const priceSum = num(r.price_sum)
     const costSum = num(r.cost_sum)
+    const netPriceSum = priceSum / divisor
 
     // No costed variant, or a zero price to divide by, means we do not know —
     // which is a different answer from a margin of zero.
@@ -144,12 +174,27 @@ export async function getProductMargins(
       variantsCosted,
       priceSum,
       costSum,
-      margin: known ? (priceSum - costSum) / priceSum : null,
-      unitProfit: known ? priceSum - costSum : null,
+      margin: known ? (netPriceSum - costSum) / netPriceSum : null,
+      marginAsEntered: known ? (priceSum - costSum) / priceSum : null,
+      unitProfit: known ? netPriceSum - costSum : null,
       coverage: variantsTotal > 0 ? variantsCosted / variantsTotal : 0,
     })
   }
   return out
+}
+
+/** The VAT basis a feed's settings describe, or null while it is unanswered. */
+export function vatBasis(settings: {
+  prices_include_vat?: boolean | null
+  vat_rate?: number | null
+}): VatBasis {
+  if (settings.prices_include_vat === null || settings.prices_include_vat === undefined) return null
+  // "Prices are already net" is a complete answer that needs no rate; "prices
+  // carry VAT" without one is still unanswered.
+  if (!settings.prices_include_vat) return { pricesIncludeVat: false, rate: 0 }
+  const rate = Number(settings.vat_rate)
+  if (!Number.isFinite(rate)) return null
+  return { pricesIncludeVat: true, rate }
 }
 
 /** Feed-wide coverage, for telling the user how much to trust the column. */

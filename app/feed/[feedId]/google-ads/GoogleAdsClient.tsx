@@ -3,10 +3,12 @@
 import { useRouter } from 'next/navigation'
 import { Fragment, useMemo, useState } from 'react'
 import {
+  breakEvenRoas,
   formatInt,
   formatMoney,
   formatPercent,
   formatRatio,
+  vatUplift,
   type ActionChoice,
   type AvailableAction,
   type ProductRow,
@@ -38,24 +40,64 @@ type Props = {
   connectError: string | null
   justConnected: boolean
   settings: SettingsView | null
-  /** Every conversion action with data in this window, largest value first. */
   availableActions: AvailableAction[]
-  /** What the ROAS/POAS columns currently mean. Several actions are summed. */
   activeActions: ActionChoice
   rows: ProductRow[]
-  /**
-   * Catalogue margin per product_ref, from Shopify's cost per item. A product
-   * absent from this map, or present with margin null, has an UNKNOWN margin —
-   * never a zero one. See lib/variantCosts.ts.
-   */
-  margins: Record<string, { margin: number | null; coverage: number }>
+  margins: Record<string, { margin: number | null; asEntered: number | null; coverage: number }>
   marginCoverage: { withMargin: number; products: number }
+  returns: Record<
+    string,
+    { returnRate: number | null; refundedInWindow: number; sampleUnits: number }
+  >
+  returnsContext: ReturnsContext | null
+  vat: {
+    pricesIncludeVat: boolean | null
+    conversionValueIncludesVat: boolean | null
+    rate: number | null
+  }
   totals: Totals | null
   from: string
   to: string
 }
 
-type Row = ProductRow & { margin: number | null; marginCoverage: number }
+type ReturnsContext = {
+  country: string | null
+  cohortFrom: string
+  cohortTo: string
+  overallRate: number | null
+  overallSample: number
+  refundedInWindow: number
+  returnedInWindow: number
+  otherRefundedInWindow: number
+  archiveDepthDays: number | null
+  archiveLastRunAt: string | null
+  archiveHasGap: boolean
+}
+
+type Row = ProductRow & {
+  margin: number | null
+  marginCoverage: number
+  /**
+   * The ROAS at which gross profit exactly covers ad cost.
+   *
+   * Null covers two different things, and the cell tells them apart by looking
+   * at `netMargin`: no cost entered (unknown), or a margin of zero or less,
+   * where no revenue multiple ever repays the spend.
+   */
+  breakEvenRoas: number | null
+  /**
+   * The margin break-even was actually derived from — always the authoritative
+   * net one, even while the column beside it is displaying the gross basis.
+   * Carried separately so the cell can tell "no cost" from "no margin" without
+   * having to know which basis `margin` is currently on.
+   */
+  netMargin: number | null
+  returnRate: number | null
+  returnSample: number
+  refundedInWindow: number
+  netRoas: number | null
+  netPoas: number | null
+}
 
 type SortKey =
   | 'cost'
@@ -66,6 +108,11 @@ type SortKey =
   | 'roas_value'
   | 'poas_value'
   | 'margin'
+  | 'breakEvenRoas'
+  | 'netRoas'
+  | 'netPoas'
+  | 'refundedInWindow'
+  | 'returnRate'
 
 const describeActions = (list: string[]): string =>
   list.length === 0 ? 'not selected' : list.map((a) => `«${a}»`).join(' + ')
@@ -93,6 +140,9 @@ export function GoogleAdsClient({
   rows,
   margins,
   marginCoverage,
+  returns,
+  returnsContext,
+  vat,
   totals,
   from,
   to,
@@ -101,8 +151,12 @@ export function GoogleAdsClient({
   const [showSetup, setShowSetup] = useState(!connected)
   const [sortKey, setSortKey] = useState<SortKey>('cost')
   const [sortDir, setSortDir] = useState<1 | -1>(-1)
+  const [query, setQuery] = useState('')
   const [expanded, setExpanded] = useState<string | null>(null)
   const [variants, setVariants] = useState<Record<string, VariantRow[]>>({})
+  const [variantReturns, setVariantReturns] = useState<
+    Record<string, { returnRate: number | null; refundedInWindow: number; sampleUnits: number }>
+  >({})
   const [loadingVariants, setLoadingVariants] = useState<string | null>(null)
   const [syncing, setSyncing] = useState(false)
   const [syncError, setSyncError] = useState<string | null>(null)
@@ -111,13 +165,6 @@ export function GoogleAdsClient({
 
   const currency = settings?.currency ?? 'DKK'
 
-  // Window and metric definition both live in the URL, so a particular view is
-  // shareable and survives a refresh. Changing one must preserve the others.
-  //
-  // The action params are ALWAYS emitted, even when empty, because the server
-  // treats an absent param as "never chosen here" and falls back to the saved
-  // default. Without the empty marker, unticking everything would silently
-  // restore the default instead of clearing the column.
   const urlWith = (patch: { days?: Window; roas?: string[]; poas?: string[] }) => {
     const q = new URLSearchParams()
     q.set('days', String(patch.days ?? days))
@@ -129,24 +176,65 @@ export function GoogleAdsClient({
     return `/feed/${feedId}/google-ads?${q.toString()}`
   }
 
+  const [grossBasis, setGrossBasis] = useState(false)
+  const vatApplies = vat.pricesIncludeVat === true && !!vat.rate && vat.rate > 0
+
+  // How much the reported conversion value overstates net revenue. Null means
+  // nobody has said — break-even then assumes the value is net, which is the
+  // OPTIMISTIC end of the range, so the footnote flags it in amber rather than
+  // letting the column pass as verified.
+  const uplift = vatUplift(vat.conversionValueIncludesVat, vat.rate)
+
+  const [showReturns, setShowReturns] = useState(false)
+
   const sorted = useMemo(() => {
     const merged: Row[] = rows.map((r) => {
       const m = r.productRef ? margins[r.productRef] : undefined
-      return { ...r, margin: m?.margin ?? null, marginCoverage: m?.coverage ?? 0 }
+      const value = grossBasis ? (m?.asEntered ?? null) : (m?.margin ?? null)
+
+      const ret = r.productRef ? returns[r.productRef] : undefined
+      const rate = ret?.returnRate ?? null
+      const kept = rate === null ? null : 1 - rate
+
+      return {
+        ...r,
+        margin: value,
+        // NOT `value`: break-even is compared against a real ROAS, so it has to
+        // mean one thing regardless of which basis someone is viewing the
+        // Margin column on — the same rule the custom-label engine follows for
+        // cogs_margin. Flipping to the gross basis moves the Margin column and
+        // deliberately leaves this one still.
+        netMargin: m?.margin ?? null,
+        breakEvenRoas: breakEvenRoas(m?.margin ?? null, uplift ?? 1),
+        marginCoverage: m?.coverage ?? 0,
+        returnRate: rate,
+        returnSample: ret?.sampleUnits ?? 0,
+        refundedInWindow: ret?.refundedInWindow ?? 0,
+        netRoas: kept === null || r.roas === null ? null : r.roas * kept,
+        netPoas: kept === null || r.poas === null ? null : r.poas * kept,
+      }
     })
-    // compare() already sends nulls last in both directions, so products with no
-    // cost never masquerade as the best or worst margin in the catalogue.
     merged.sort((a, b) => compare(a[sortKey], b[sortKey], sortDir))
     return merged
-  }, [rows, margins, sortKey, sortDir])
+  }, [rows, margins, returns, sortKey, sortDir, grossBasis, uplift])
+
+  const visible = useMemo(() => {
+    const terms = query.toLowerCase().split(/\s+/).filter(Boolean)
+    if (!terms.length) return sorted
+    return sorted.filter((r) => {
+      const hay = [r.title, r.productRef, r.handle, r.vendor, r.productType]
+        .filter(Boolean)
+        .join(' ')
+        .toLowerCase()
+      return terms.every((t) => hay.includes(t))
+    })
+  }, [sorted, query])
 
   const unmatchedCost = useMemo(
     () => rows.filter((r) => r.unmatched).reduce((n, r) => n + r.cost, 0),
     [rows]
   )
 
-  // Order is not meaningful — a set of actions is the same choice however it was
-  // ticked — so compare as sets rather than by position.
   const sameSet = (a: string[], b: string[]) =>
     a.length === b.length && a.every((x) => b.includes(x))
 
@@ -179,15 +267,15 @@ export function GoogleAdsClient({
       for (const a of activeActions.poas) q.append('poas', a)
       const res = await fetch(`/api/google-ads/${feedId}/variants?${q.toString()}`)
       const json = await res.json()
-      if (res.ok) setVariants((v) => ({ ...v, [productRef]: json.variants ?? [] }))
+      if (res.ok) {
+        setVariants((v) => ({ ...v, [productRef]: json.variants ?? [] }))
+        setVariantReturns((v) => ({ ...v, ...(json.returns ?? {}) }))
+      }
     } finally {
       setLoadingVariants(null)
     }
   }
 
-  // Persists the current on-page choice as the feed's default, so a fresh visit
-  // (and later the bucket engine) uses it. syncNow is false: the data is already
-  // stored for every action, so changing the definition needs no re-fetch.
   async function saveDefaults() {
     if (!settings?.customerId) return
     setSavingDefaults(true)
@@ -235,7 +323,11 @@ export function GoogleAdsClient({
 
   return (
     <div className="min-h-screen" style={{ background: 'var(--bg-base)' }}>
-      <main className="max-w-6xl mx-auto px-6 py-9 space-y-7">
+      {/* The product table is wide (11 numeric columns + variants), so the old
+          max-w-6xl (1152px) cap squeezed it while the AppShell content area —
+          flex-1, no cap — sat half empty. Inline maxWidth so it can't be silently
+          dropped by class generation; still centred so ultrawide doesn't sprawl. */}
+      <main className="mx-auto px-6 py-9 space-y-7" style={{ maxWidth: '1800px' }}>
         {/* ── Header ─────────────────────────────────────────────── */}
         <header className="flex items-end justify-between gap-4 flex-wrap">
           <div className="space-y-1.5">
@@ -369,7 +461,6 @@ export function GoogleAdsClient({
           </div>
         )}
 
-        {/* ── What the numbers mean ─────────────────────────────── */}
         {connected && availableActions.length > 0 && (
           <section className="wl-card" style={{ padding: '16px 18px' }}>
             <div className="flex flex-wrap items-end gap-4">
@@ -407,28 +498,11 @@ export function GoogleAdsClient({
               }}
             >
               The same order is usually counted by several actions at once. The amount next
-              to each action is what it reports over the period — an action reporting many
-              times the real revenue is normally a &laquo;view item&raquo; tracker, not revenue.
-              Switch freely: every action has already been fetched.
-            </p>
-            <p
-              style={{
-                fontSize: '12px',
-                color: 'var(--ink-muted)',
-                marginTop: '6px',
-                lineHeight: 1.5,
-                maxWidth: '62ch',
-              }}
-            >
-              Ticking several actions adds them together. That is what you want for actions
-              covering separate slices — new versus returning, or one per market — but two
-              actions that both count the whole account will count every order twice. Nothing
-              here can tell the difference, so the choice is yours.
+              to each action is what it reports over the period
             </p>
           </section>
         )}
 
-        {/* ── KPIs ───────────────────────────────────────────────── */}
         {connected && totals && (
           <section className="grid gap-3" style={{ gridTemplateColumns: 'repeat(auto-fit,minmax(150px,1fr))' }}>
             <Stat label="Cost" value={formatMoney(totals.cost, currency)} />
@@ -472,6 +546,59 @@ export function GoogleAdsClient({
 
         {connected && rows.length > 0 && (
           <section className="wl-card" style={{ padding: 0, overflow: 'hidden' }}>
+            <div
+              className="flex items-center justify-between gap-3 flex-wrap"
+              style={{ padding: '12px 18px', borderBottom: '1px solid var(--hairline)' }}
+            >
+              <span style={{ fontSize: '12px', color: 'var(--ink-muted)' }}>
+                {query.trim()
+                  ? `${formatInt(visible.length)} of ${formatInt(sorted.length)} products`
+                  : `${formatInt(sorted.length)} products`}
+              </span>
+              <div className="flex items-center gap-4 flex-wrap">
+                {vatApplies && (
+                  <label
+                    className="flex items-center gap-1.5"
+                    style={{ fontSize: '12px', color: 'var(--ink-secondary)', cursor: 'pointer' }}
+                    // Says what it does AND what it does not. This control was
+                    // called "Margin incl. VAT", one of two things on the page
+                    // with VAT in the name — and the other one is the setting
+                    // that actually moves break-even. Ticking this and watching
+                    // break-even sit still read as a broken feature.
+                    title={`Changes how the Margin column is DISPLAYED, nothing else. Margin is normally taken on prices net of ${vat.rate}% VAT, the basis Shopify's cost per item is on; this shows it on gross prices for reconciling against Shopify. Break-even is unaffected — it always uses the net margin.`}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={grossBasis}
+                      onChange={(e) => setGrossBasis(e.target.checked)}
+                      style={{ accentColor: 'var(--accent-purple)' }}
+                    />
+                    Margin on gross prices
+                  </label>
+                )}
+                {returnsContext && (
+                  <label
+                    style={{
+                      fontSize: '12px',
+                      color: 'var(--ink-secondary)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '6px',
+                      whiteSpace: 'nowrap',
+                    }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={showReturns}
+                      onChange={(e) => setShowReturns(e.target.checked)}
+                      style={{ accentColor: 'var(--accent-purple)' }}
+                    />
+                    Returns
+                  </label>
+                )}
+                <SearchBox value={query} onChange={setQuery} placeholder="Search products…" />
+              </div>
+            </div>
             <div style={{ overflowX: 'auto' }}>
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
                 <thead>
@@ -496,6 +623,34 @@ export function GoogleAdsClient({
                     <Th sortable active={sortKey === 'roas'} dir={sortDir} onClick={() => setSort('roas')}>
                       ROAS
                     </Th>
+                    {showReturns && (
+                      <Th sortable active={sortKey === 'netRoas'} dir={sortDir} onClick={() => setSort('netRoas')}>
+                        Net ROAS
+                      </Th>
+                    )}
+                    {/* Sits beside whichever ROAS is the operative one, because
+                        the number only means something next to the one it is
+                        being compared against. */}
+                    <Th
+                      sortable
+                      active={sortKey === 'breakEvenRoas'}
+                      dir={sortDir}
+                      onClick={() => setSort('breakEvenRoas')}
+                    >
+                      Break-even
+                      {/* Points the column at the setting that governs it. Without
+                          this the only clue that break-even is on an unverified
+                          basis lives in a footnote, which is not where anyone
+                          reading a number is looking. */}
+                      {uplift === null && (
+                        <span
+                          title="Unverified: nobody has said whether Google's conversion value includes VAT, so this assumes it does not — which makes it too low if it does. Set it in the notes below the table."
+                          style={{ color: 'var(--accent-amber)', marginLeft: '4px' }}
+                        >
+                          *
+                        </span>
+                      )}
+                    </Th>
                     <Th sortable active={sortKey === 'poas_value'} dir={sortDir} onClick={() => setSort('poas_value')}>
                       Profit
                       <CountPill n={activeActions.poas.length} />
@@ -503,11 +658,26 @@ export function GoogleAdsClient({
                     <Th sortable active={sortKey === 'poas'} dir={sortDir} onClick={() => setSort('poas')}>
                       POAS
                     </Th>
+                    {showReturns && (
+                      <Th sortable active={sortKey === 'netPoas'} dir={sortDir} onClick={() => setSort('netPoas')}>
+                        Net POAS
+                      </Th>
+                    )}
+                    {showReturns && (
+                      <Th
+                        sortable
+                        active={sortKey === 'refundedInWindow'}
+                        dir={sortDir}
+                        onClick={() => setSort('refundedInWindow')}
+                      >
+                        Refunded
+                      </Th>
+                    )}
                     <Th style={{ paddingRight: '18px' }}>Profit − cost</Th>
                   </tr>
                 </thead>
                 <tbody>
-                  {sorted.map((r, idx) => {
+                  {visible.map((r, idx) => {
                     const key = r.productRef ?? `unmatched-${idx}`
                     const isOpen = expanded === r.productRef
                     return (
@@ -558,10 +728,45 @@ export function GoogleAdsClient({
                           <Td>
                             <Ratio value={r.roas} />
                           </Td>
+                          {showReturns && (
+                            <Td>
+                              <NetRatio value={r.netRoas} rate={r.returnRate} sample={r.returnSample} />
+                            </Td>
+                          )}
+                          <Td>
+                            <BreakEven
+                              value={r.breakEvenRoas}
+                              margin={r.netMargin}
+                              // Judged against the net figure whenever returns
+                              // are on screen: telling someone they clear
+                              // break-even on gross, while the column beside it
+                              // says otherwise, is the wrong kind of quiet.
+                              actual={showReturns && r.netRoas !== null ? r.netRoas : r.roas}
+                            />
+                          </Td>
                           <Td>{formatMoney(r.poas_value, currency)}</Td>
                           <Td>
                             <Ratio value={r.poas} />
                           </Td>
+                          {showReturns && (
+                            <Td>
+                              <NetRatio value={r.netPoas} rate={r.returnRate} sample={r.returnSample} />
+                            </Td>
+                          )}
+                          {showReturns && (
+                            <Td>
+                              <span
+                                style={{
+                                  color:
+                                    r.refundedInWindow > 0 ? 'var(--ink)' : 'var(--ink-muted)',
+                                }}
+                              >
+                                {r.refundedInWindow > 0
+                                  ? formatMoney(r.refundedInWindow, currency)
+                                  : '—'}
+                              </span>
+                            </Td>
+                          )}
                           <Td style={{ paddingRight: '18px' }}>
                             <span
                               style={{
@@ -580,7 +785,10 @@ export function GoogleAdsClient({
 
                         {isOpen && (
                           <tr>
-                            <td colSpan={10} style={{ background: 'var(--bg-surface)', padding: '0 18px 14px 40px' }}>
+                            <td
+                              colSpan={showReturns ? 14 : 11}
+                              style={{ background: 'var(--bg-surface)', padding: '0 18px 14px 40px' }}
+                            >
                               {loadingVariants === r.productRef ? (
                                 <p style={{ fontSize: '12px', color: 'var(--ink-muted)', padding: '10px 0' }}>
                                   Loading variants…
@@ -589,6 +797,8 @@ export function GoogleAdsClient({
                                 <VariantTable
                                   rows={variants[r.productRef ?? ''] ?? []}
                                   currency={currency}
+                                  returns={variantReturns}
+                                  showReturns={showReturns}
                                 />
                               )}
                             </td>
@@ -600,14 +810,24 @@ export function GoogleAdsClient({
                 </tbody>
               </table>
             </div>
+            {query.trim() && visible.length === 0 && (
+              <p
+                style={{
+                  fontSize: '13px',
+                  color: 'var(--ink-muted)',
+                  padding: '28px 18px',
+                  textAlign: 'center',
+                }}
+              >
+                No product matches «{query.trim()}» in this window.
+              </p>
+            )}
           </section>
         )}
 
         {/* ── Footnotes that stop the numbers being misread ──────── */}
         {connected && rows.length > 0 && (
           <div className="space-y-1.5" style={{ fontSize: '12px', color: 'var(--ink-muted)' }}>
-            {/* Spelled out in full rather than as a count: which actions produced
-                a number is the thing someone needs when the number surprises them. */}
             <p>
               Revenue = {describeActions(activeActions.roas)} · Gross profit ={' '}
               {describeActions(activeActions.poas)}
@@ -624,6 +844,21 @@ export function GoogleAdsClient({
               is entered, not because the margin is zero. An asterisk means the cost covers
               only some of the product&apos;s variants.
             </p>
+            <p>
+              Break-even is the ROAS at which gross profit covers the ad cost
+              {uplift !== null && uplift !== 1
+                ? ` — ${formatRatio(uplift, 2)} ÷ margin, the VAT uplift included so the reported conversion value and the net margin are on one basis`
+                : ' — 1 ÷ margin'}
+              . Green means the product clears it{showReturns ? ' after returns' : ''}, red means
+              it does not. It always uses the net margin, so it does not move when the Margin
+              column is flipped to the gross basis. It is a floor and not a target: shipping,
+              payment fees and overhead come out after it, so a product sitting just above
+              break-even is not yet making money.
+            </p>
+            <VatNote feedId={feedId} vat={vat} uplift={uplift} grossBasis={grossBasis} />
+            {showReturns && returnsContext && (
+              <ReturnsNote ctx={returnsContext} currency={currency} />
+            )}
             {unmatchedCost > 0 && (
               <p style={{ color: 'var(--accent-amber)' }}>
                 {formatMoney(unmatchedCost, currency)} could not be matched to a product in
@@ -677,15 +912,6 @@ function Stat({
   )
 }
 
-/**
- * Multi-select over conversion actions. A checkbox list rather than a native
- * `<select multiple>`: the amounts beside each name are what stop someone
- * picking a view tracker, and a native multi-select renders them badly and
- * makes ctrl-click the only way to add a second choice.
- *
- * Selections are applied on close, not per tick, so choosing three actions is
- * one navigation instead of three.
- */
 function MetricPicker({
   label,
   selected,
@@ -749,8 +975,6 @@ function MetricPicker({
 
         {open && (
           <>
-            {/* Catches the click that dismisses the panel, so a selection is
-                committed by clicking away as well as by the toggle. */}
             <div
               onClick={close}
               style={{ position: 'fixed', inset: 0, zIndex: 20 }}
@@ -835,13 +1059,402 @@ function MetricPicker({
 }
 
 /**
- * Catalogue margin. An em dash for "no cost entered in Shopify" — deliberately
- * the same glyph the other columns use for absent data, because an unknown
- * margin is exactly that and must not read as 0%.
+ * Both VAT bases, in one editor because they share one rate.
  *
- * Partial coverage is flagged rather than hidden: a product whose margin covers
- * 2 of its 6 variants is a weaker claim than one covering all 6.
+ * The questions are independent — Shopify's prices and Google's conversion
+ * value can sit on different bases — but the rate is a property of the market,
+ * so asking for it twice would invite two answers to a question with one.
  */
+function VatNote({
+  feedId,
+  vat,
+  uplift,
+  grossBasis,
+}: {
+  feedId: string
+  vat: {
+    pricesIncludeVat: boolean | null
+    conversionValueIncludesVat: boolean | null
+    rate: number | null
+  }
+  /**
+   * What the column ACTUALLY applied, not what the setting says. The two can
+   * only diverge in a state the route refuses to write — "gross, but no usable
+   * rate" — and branching on the applied value means the note can never claim
+   * a correction the numbers did not receive.
+   */
+  uplift: number | null
+  grossBasis: boolean
+}) {
+  const router = useRouter()
+  const [editing, setEditing] = useState(false)
+  // Tri-state, initialised from the stored value WITHOUT a fallback. These used
+  // to be `?? true`, which rendered an unanswered question as an already-ticked
+  // box: opening the editor and pressing Save then looked like making a choice
+  // while every later attempt re-saved the same value and correctly changed
+  // nothing. "Nothing happens when I set it" was the honest report of that.
+  const [includes, setIncludes] = useState<boolean | null>(vat.pricesIncludeVat)
+  const [convIncludes, setConvIncludes] = useState<boolean | null>(
+    vat.conversionValueIncludesVat
+  )
+  const [rate, setRate] = useState(vat.rate === null ? '25' : String(vat.rate))
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const needsRate = includes === true || convIncludes === true
+  const unanswered = includes === null || convIncludes === null
+
+  async function save() {
+    // Guarded as well as disabled: the button is the only path today, but the
+    // route would otherwise receive a null it reads as "leave unchanged".
+    if (includes === null || convIncludes === null) return
+    setSaving(true)
+    setError(null)
+    const res = await fetch(`/api/google-ads/${feedId}/vat`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        pricesIncludeVat: includes,
+        conversionValueIncludesVat: convIncludes,
+        vatRate: needsRate ? Number(rate) : null,
+      }),
+    })
+    const json = await res.json().catch(() => ({}))
+    setSaving(false)
+    if (!res.ok) {
+      setError((json as { error?: string }).error ?? 'Could not save')
+      return
+    }
+    setEditing(false)
+    router.refresh()
+  }
+
+  if (editing) {
+    return (
+      <div className="space-y-2" style={{ paddingTop: '2px' }}>
+        <TriChoice
+          label="Do Shopify's prices include VAT?"
+          value={includes}
+          onChange={setIncludes}
+        />
+        <TriChoice
+          label="Does Google's conversion value include VAT?"
+          value={convIncludes}
+          onChange={setConvIncludes}
+          hint="This is the one that moves break-even."
+        />
+        <div className="flex items-center gap-2 flex-wrap">
+          {needsRate && (
+            <>
+              <input
+                type="number"
+                step="any"
+                value={rate}
+                onChange={(e) => setRate(e.target.value)}
+                aria-label="VAT rate in percent"
+                style={{
+                  padding: '4px 8px',
+                  borderRadius: '8px',
+                  border: '1px solid var(--hairline)',
+                  background: 'var(--bg-base)',
+                  color: 'var(--ink)',
+                  fontSize: '12px',
+                  width: '64px',
+                }}
+              />
+              <span>%</span>
+            </>
+          )}
+          <button
+            onClick={save}
+            disabled={saving || unanswered}
+            className="wl-btn-primary"
+            title={unanswered ? 'Answer both questions first' : undefined}
+            style={unanswered ? { opacity: 0.5, cursor: 'not-allowed' } : undefined}
+          >
+            {saving ? 'Saving…' : 'Save'}
+          </button>
+          <button onClick={() => setEditing(false)} className="wl-btn-secondary">
+            Cancel
+          </button>
+          {error && <span style={{ color: 'var(--accent-red)' }}>{error}</span>}
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <>
+      {/* ── Do Shopify's prices carry VAT ── */}
+      {vat.pricesIncludeVat === null ? (
+        // Unanswered. The margin on screen is the overstated one, and says so.
+        <p style={{ color: 'var(--accent-amber)' }}>
+          Margin is calculated on prices exactly as Shopify stores them. If those include VAT and
+          your cost per item does not — the usual setup for a Danish shop — the margin shown is too
+          high, and most so where it is thinnest.{' '}
+          <button onClick={() => setEditing(true)} style={linkButton}>
+            Set the VAT basis
+          </button>
+        </p>
+      ) : !vat.pricesIncludeVat ? (
+        <p>
+          Shopify prices are net of VAT, so margin needs no adjustment.{' '}
+          <button onClick={() => setEditing(true)} style={linkButton}>
+            Change
+          </button>
+        </p>
+      ) : (
+        <p>
+          {grossBasis
+            ? `Margin is shown on gross prices, VAT included — for reconciling against Shopify. It overstates profitability, because cost per item is net of VAT.`
+            : `Margin is taken on prices net of ${vat.rate}% VAT, the same basis as Shopify's cost per item.`}{' '}
+          <button onClick={() => setEditing(true)} style={linkButton}>
+            Change
+          </button>
+        </p>
+      )}
+
+      {/* ── Does Google's conversion value carry VAT ── */}
+      {uplift === null ? (
+        <p style={{ color: 'var(--accent-amber)' }}>
+          Break-even is treating Google&apos;s conversion value as net of VAT, because the basis is
+          not on record. Shopify&apos;s standard tracking sends the gross order total — if that is
+          your setup, every break-even here is too LOW by the VAT rate, and products are being
+          marked as clearing a bar they are under.{' '}
+          <button onClick={() => setEditing(true)} style={linkButton}>
+            Set the conversion value basis
+          </button>
+        </p>
+      ) : uplift > 1 ? (
+        <p>
+          Google&apos;s conversion value includes {vat.rate}% VAT, so break-even is raised by that
+          much to meet the net margin on the same basis.{' '}
+          <button onClick={() => setEditing(true)} style={linkButton}>
+            Change
+          </button>
+        </p>
+      ) : (
+        <p>
+          Google&apos;s conversion value is net of VAT, the same basis as the margin, so break-even
+          is 1 ÷ margin unadjusted.{' '}
+          <button onClick={() => setEditing(true)} style={linkButton}>
+            Change
+          </button>
+        </p>
+      )}
+    </>
+  )
+}
+
+/**
+ * A yes/no question that is allowed to be UNANSWERED.
+ *
+ * A checkbox has two states and the question has three. Rendering null as
+ * unticked asserts "no"; defaulting it to ticked — which this replaced —
+ * asserts "yes" and, worse, makes choosing indistinguishable from finding it
+ * already chosen. Someone re-saving what they believe is a change then sees
+ * nothing move, because nothing did.
+ *
+ * Neither pill is active while the answer is null, and the caller keeps Save
+ * disabled until both questions have one. Same contract as the columns behind
+ * them: absence is not a value.
+ */
+function TriChoice({
+  label,
+  value,
+  onChange,
+  hint,
+}: {
+  label: string
+  value: boolean | null
+  onChange: (v: boolean) => void
+  hint?: string
+}) {
+  return (
+    <div className="flex items-center gap-2 flex-wrap">
+      <span style={{ color: value === null ? 'var(--accent-amber)' : 'var(--ink-secondary)' }}>
+        {label}
+      </span>
+      <div className="flex gap-1">
+        {([true, false] as const).map((opt) => (
+          <button
+            key={String(opt)}
+            type="button"
+            onClick={() => onChange(opt)}
+            aria-pressed={value === opt}
+            className="wl-pill"
+            style={{
+              cursor: 'pointer',
+              background: value === opt ? 'var(--accent-purple)' : 'transparent',
+              color: value === opt ? '#fff' : 'var(--ink-muted)',
+              border: value === opt ? 'none' : '1px solid var(--hairline)',
+            }}
+          >
+            {opt ? 'Yes' : 'No'}
+          </button>
+        ))}
+      </div>
+      {value === null ? (
+        <span style={{ color: 'var(--accent-amber)' }}>not answered</span>
+      ) : (
+        hint && <span style={{ color: 'var(--ink-muted)' }}>{hint}</span>
+      )}
+    </div>
+  )
+}
+
+const linkButton: React.CSSProperties = {
+  background: 'none',
+  border: 'none',
+  padding: 0,
+  font: 'inherit',
+  color: 'var(--accent-purple)',
+  cursor: 'pointer',
+}
+
+function ReturnsNote({ ctx, currency }: { ctx: ReturnsContext; currency: string }) {
+  return (
+    <>
+      <p>
+        Net ROAS and net POAS are the gross figures reduced by this product&apos;s measured
+        return rate — refunded value ÷ sold value for orders placed{' '}
+        {ctx.cohortFrom && ctx.cohortTo ? (
+          <>
+            between {ctx.cohortFrom} and {ctx.cohortTo}
+          </>
+        ) : (
+          'in the matured period'
+        )}
+        {ctx.country ? ` in ${ctx.country}` : ''}. That period stops 30 days short of today on
+        purpose: a return takes weeks to arrive, so counting recent orders would make every
+        product look clean. Google is not told any of this — its own numbers are unchanged.
+      </p>
+      <p>
+        &laquo;Refunded&raquo; is different: it is money that actually left in the window
+        shown, whatever the age of the order it belonged to. It will not match the net
+        columns, and is not supposed to.{' '}
+        {ctx.refundedInWindow > 0 && (
+          <>
+            {formatMoney(ctx.returnedInWindow, currency)} of it was return-driven
+            {ctx.otherRefundedInWindow > 0 && (
+              <> and {formatMoney(ctx.otherRefundedInWindow, currency)} was cancellations or
+              goodwill</>
+            )}
+            .
+          </>
+        )}
+      </p>
+      <p>
+        A product shows &laquo;—&raquo; until it has sold at least 20 units in the matured
+        period — one return out of three is not a 33% return rate, it is an unknown one.
+        {ctx.overallRate !== null && (
+          <>
+            {' '}
+            Across this market the rate is {formatPercent(ctx.overallRate, 1)} on{' '}
+            {formatInt(ctx.overallSample)} units, which is context for a product with too few
+            of its own — not a substitute for it.
+          </>
+        )}
+      </p>
+      {(ctx.archiveHasGap || (ctx.archiveDepthDays ?? 0) < 90) && (
+        <p style={{ color: 'var(--accent-amber)' }}>
+          {ctx.archiveLastRunAt === null
+            ? 'No order history has been captured yet, so no return rate can exist. '
+            : `Order history goes back ${ctx.archiveDepthDays ?? 0} days. `}
+          Shopify only exposes the last 60 days without the read_all_orders scope, so history
+          is built by syncing regularly — and any gap longer than that is permanent.
+          {ctx.archiveHasGap && ctx.archiveLastRunAt !== null && ' The sync has lapsed past that window.'}
+        </p>
+      )}
+    </>
+  )
+}
+
+function NetRatio({
+  value,
+  rate,
+  sample,
+}: {
+  value: number | null
+  rate: number | null
+  sample: number
+}) {
+  if (value === null || rate === null) {
+    return (
+      <span
+        style={{ color: 'var(--ink-muted)' }}
+        title={
+          sample > 0
+            ? `Only ${sample} unit(s) sold in the matured period — too few for a return rate`
+            : 'No matured sales for this product yet'
+        }
+      >
+        —
+      </span>
+    )
+  }
+  return (
+    <span style={{ display: 'inline-flex', flexDirection: 'column', alignItems: 'flex-end' }}>
+      <Ratio value={value} />
+      <span style={{ fontSize: '10px', color: 'var(--ink-muted)', marginTop: '2px' }}>
+        −{formatPercent(rate, 0)}
+      </span>
+    </span>
+  )
+}
+
+function SearchBox({
+  value,
+  onChange,
+  placeholder,
+}: {
+  value: string
+  onChange: (v: string) => void
+  placeholder: string
+}) {
+  return (
+    <div className="flex items-center gap-1.5">
+      <input
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === 'Escape') onChange('')
+        }}
+        placeholder={placeholder}
+        aria-label={placeholder}
+        style={{
+          padding: '6px 10px',
+          borderRadius: '10px',
+          border: '1px solid var(--hairline)',
+          background: 'var(--bg-base)',
+          color: 'var(--ink)',
+          fontSize: '13px',
+          width: '220px',
+          maxWidth: '100%',
+        }}
+      />
+      {value && (
+        <button
+          onClick={() => onChange('')}
+          title="Clear"
+          aria-label="Clear search"
+          style={{
+            background: 'none',
+            border: 'none',
+            color: 'var(--ink-muted)',
+            cursor: 'pointer',
+            fontSize: '15px',
+            lineHeight: 1,
+            padding: '4px',
+          }}
+        >
+          ×
+        </button>
+      )}
+    </div>
+  )
+}
+
 function Margin({ value, coverage }: { value: number | null; coverage: number }) {
   if (value === null) {
     return <span style={{ color: 'var(--ink-muted)' }}>—</span>
@@ -854,6 +1467,75 @@ function Margin({ value, coverage }: { value: number | null; coverage: number })
     >
       {formatPercent(value, 0)}
       {partial && <span style={{ color: 'var(--ink-muted)' }}>*</span>}
+    </span>
+  )
+}
+
+/**
+ * The ROAS a product must clear before its ads stop costing money.
+ *
+ * Gross profit is revenue × margin, and break-even is where that equals ad
+ * cost — so the threshold is 1 ÷ margin and nothing else. It is a property of
+ * the product, not of a campaign: it exists for a product that has never been
+ * advertised, and it does not move when spend does.
+ *
+ * TINTED BY THE VERDICT, NOT BY THE VALUE. A break-even of 3.1 is neither good
+ * nor bad on its own — the finding is whether the product is above or below it,
+ * and asking someone to do that subtraction across two columns is how it stops
+ * being read. Grey whenever either half is unknown: a product with no traffic
+ * is not failing its target, it has no verdict yet.
+ *
+ * Plain text rather than the pill `Ratio` uses, so the threshold cannot be
+ * mistaken for another score sitting next to the real one.
+ */
+function BreakEven({
+  value,
+  margin,
+  actual,
+}: {
+  value: number | null
+  margin: number | null
+  actual: number | null
+}) {
+  if (value === null) {
+    // Two very different nulls. A known margin that is zero or negative means
+    // no revenue multiple ever repays the spend — a finding worth stating, not
+    // absent data. An unknown margin is just unknown.
+    const unreachable = margin !== null
+    return (
+      <span
+        style={{ color: unreachable ? 'var(--accent-red)' : 'var(--ink-muted)' }}
+        title={
+          unreachable
+            ? 'No gross margin on this product, so no ROAS breaks even'
+            : 'No cost per item entered, so break-even cannot be worked out'
+        }
+      >
+        {unreachable ? '∞' : '—'}
+      </span>
+    )
+  }
+
+  const clears = actual === null ? null : actual >= value
+  return (
+    <span
+      title={
+        clears === null
+          ? 'No ROAS to compare against yet'
+          : clears
+            ? 'Above break-even'
+            : 'Below break-even — the ads cost more than the gross profit they earn'
+      }
+      style={{
+        color:
+          clears === null
+            ? 'var(--ink-muted)'
+            : clears
+              ? 'var(--accent-green)'
+              : 'var(--accent-red)',
+      }}
+    >
+      {formatRatio(value)}
     </span>
   )
 }
@@ -946,7 +1628,17 @@ function Ratio({ value }: { value: number | null }) {
   )
 }
 
-function VariantTable({ rows, currency }: { rows: VariantRow[]; currency: string }) {
+function VariantTable({
+  rows,
+  currency,
+  returns,
+  showReturns,
+}: {
+  rows: VariantRow[]
+  currency: string
+  returns: Record<string, { returnRate: number | null; refundedInWindow: number; sampleUnits: number }>
+  showReturns: boolean
+}) {
   if (!rows.length) {
     return (
       <p style={{ fontSize: '12px', color: 'var(--ink-muted)', padding: '10px 0' }}>
@@ -960,27 +1652,50 @@ function VariantTable({ rows, currency }: { rows: VariantRow[]; currency: string
         {rows
           .slice()
           .sort((a, b) => b.cost - a.cost)
-          .map((v) => (
-            <tr key={v.itemId} style={{ borderBottom: '0.5px solid var(--hairline)' }}>
-              <td style={{ padding: '8px 12px 8px 0', color: 'var(--ink-secondary)' }}>
-                {v.options.length ? v.options.join(' · ') : (v.variantTitle ?? v.itemId)}
-                {v.sku && (
-                  <span style={{ color: 'var(--ink-muted)', marginLeft: '8px' }}>{v.sku}</span>
+          .map((v) => {
+            const ret = v.variantRef ? returns[v.variantRef] : undefined
+            const rate = ret?.returnRate ?? null
+            const kept = rate === null ? null : 1 - rate
+            return (
+              <tr key={v.itemId} style={{ borderBottom: '0.5px solid var(--hairline)' }}>
+                <td style={{ padding: '8px 12px 8px 0', color: 'var(--ink-secondary)' }}>
+                  {v.options.length ? v.options.join(' · ') : (v.variantTitle ?? v.itemId)}
+                  {v.sku && (
+                    <span style={{ color: 'var(--ink-muted)', marginLeft: '8px' }}>{v.sku}</span>
+                  )}
+                </td>
+                <Td>{formatInt(v.impressions)}</Td>
+                <Td>{formatInt(v.clicks)}</Td>
+                <Td>{formatMoney(v.cost, currency)}</Td>
+                <Td>{formatMoney(v.roas_value, currency)}</Td>
+                <Td>
+                  <Ratio value={v.roas} />
+                </Td>
+                {showReturns && (
+                  <Td>
+                    <NetRatio
+                      value={kept === null || v.roas === null ? null : v.roas * kept}
+                      rate={rate}
+                      sample={ret?.sampleUnits ?? 0}
+                    />
+                  </Td>
                 )}
-              </td>
-              <Td>{formatInt(v.impressions)}</Td>
-              <Td>{formatInt(v.clicks)}</Td>
-              <Td>{formatMoney(v.cost, currency)}</Td>
-              <Td>{formatMoney(v.roas_value, currency)}</Td>
-              <Td>
-                <Ratio value={v.roas} />
-              </Td>
-              <Td>{formatMoney(v.poas_value, currency)}</Td>
-              <Td style={{ paddingRight: 0 }}>
-                <Ratio value={v.poas} />
-              </Td>
-            </tr>
-          ))}
+                <Td>{formatMoney(v.poas_value, currency)}</Td>
+                <Td style={{ paddingRight: showReturns ? '12px' : 0 }}>
+                  <Ratio value={v.poas} />
+                </Td>
+                {showReturns && (
+                  <Td style={{ paddingRight: 0 }}>
+                    <NetRatio
+                      value={kept === null || v.poas === null ? null : v.poas * kept}
+                      rate={rate}
+                      sample={ret?.sampleUnits ?? 0}
+                    />
+                  </Td>
+                )}
+              </tr>
+            )
+          })}
       </tbody>
     </table>
   )

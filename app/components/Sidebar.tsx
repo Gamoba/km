@@ -16,10 +16,10 @@ const FEED_NAV = [
   { label: 'Mapping', href: 'mapping', icon: 'sliders' },
   { label: 'Filters', href: 'filters', icon: 'filter' },
   { label: 'AI Titles', href: 'optimize', icon: 'sparkles' },
-  // `exact` because /google-ads/buckets is a sibling nav item, not a sub-page of
+  // `exact` because /google-ads/labels is a sibling nav item, not a sub-page of
   // this one — without it prefix matching would light both up at once.
   { label: 'Ads Performance', href: 'google-ads', icon: 'chart', exact: true },
-  { label: 'Buckets', href: 'google-ads/buckets', icon: 'layers' },
+  { label: 'Custom labels', href: 'google-ads/labels', icon: 'layers' },
   { label: 'Wasted spend', href: 'google-ads/waste', icon: 'trend-down' },
   { label: 'Preview', href: 'preview', icon: 'eye' },
   { label: 'Settings', href: 'settings', icon: 'settings' },
