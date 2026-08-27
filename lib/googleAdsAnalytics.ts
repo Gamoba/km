@@ -18,19 +18,12 @@ type RawTotals = {
 
 // Derived, all nullable where a denominator can be absent.
 export type Derived = {
-  /** conversions_value of the chosen revenue action ÷ cost */
   roas: number | null
-  /** conversions_value of the chosen profit action ÷ cost */
   poas: number | null
-  /** clicks ÷ impressions */
   ctr: number | null
-  /** cost ÷ clicks */
   cpc: number | null
-  /** revenue ÷ conversions */
   aov: number | null
-  /** profit ÷ revenue — the margin implied by the two chosen actions */
   margin: number | null
-  /** gross profit minus ad cost. Negative = this product loses money on ads. */
   profitAfterAdSpend: number | null
 }
 
@@ -108,12 +101,33 @@ function rawFrom(r: Record<string, unknown>): RawTotals {
   }
 }
 
-export function windowRange(days: number, now = new Date()): { from: string; to: string } {
+export type DateRange = { from: string; to: string }
+
+export function windowRange(days: number, now = new Date()): DateRange {
   const DAY = 86_400_000
   const to = new Date(now.getTime() - DAY)
   const from = new Date(to.getTime() - (Math.max(1, days) - 1) * DAY)
   const f = (d: Date) => d.toISOString().slice(0, 10)
   return { from: f(from), to: f(to) }
+}
+
+export function previousRange(days: number, now = new Date()): DateRange {
+  const DAY = 86_400_000
+  const current = windowRange(days, now)
+  const to = new Date(`${current.from}T00:00:00Z`).getTime() - DAY
+  const from = to - (Math.max(1, days) - 1) * DAY
+  const f = (ms: number) => new Date(ms).toISOString().slice(0, 10)
+  return { from: f(from), to: f(to) }
+}
+
+export type Delta = { abs: number; pct: number | null }
+
+export function delta(current: number | null, previous: number | null): Delta | null {
+  if (current === null || previous === null) return null
+  return {
+    abs: current - previous,
+    pct: previous === 0 ? null : (current - previous) / Math.abs(previous),
+  }
 }
 
 /**
@@ -196,9 +210,10 @@ export async function getProductPerformance(
   db: SupabaseClient,
   feedId: string,
   days: number,
-  actions: ActionChoice = NO_ACTIONS
+  actions: ActionChoice = NO_ACTIONS,
+  range?: DateRange
 ): Promise<{ rows: ProductRow[]; totals: Totals; from: string; to: string }> {
-  const { from, to } = windowRange(days)
+  const { from, to } = range ?? windowRange(days)
 
   const { data, error } = await db.rpc('google_ads_product_summary', {
     p_feed_id: feedId,
@@ -292,6 +307,122 @@ export async function getVariantPerformance(
         .filter((o) => o && o !== 'Default Title'),
       price: (r.price as string | null) ?? null,
     }
+  })
+}
+
+// ── The time dimension ───────────────────────────────────────────────────────
+
+/**
+ * How much history actually exists for this feed.
+ *
+ * The sync window setting says what the NEXT sync will fetch, not what has ever
+ * been fetched — a feed synced for the first time yesterday has one day of data
+ * whatever its setting says. Comparing against a period that predates the
+ * archive would show growth that is really just an empty denominator, so the
+ * comparison has to be able to check itself against this.
+ */
+export async function getSyncedRange(
+  db: SupabaseClient,
+  feedId: string
+): Promise<{ first: string | null; last: string | null; days: number }> {
+  const { data, error } = await db.rpc('google_ads_synced_range', { p_feed_id: feedId })
+  if (error) dbError('getSyncedRange', error)
+
+  const r = ((data ?? []) as Record<string, unknown>[])[0]
+  return {
+    first: (r?.first_date as string | null) ?? null,
+    last: (r?.last_date as string | null) ?? null,
+    days: num(r?.days),
+  }
+}
+
+export type Comparison = {
+  from: string
+  to: string
+  totals: Totals
+  byProduct: Map<string, RawTotals & Derived>
+  partial: boolean
+  coveredDays: number
+}
+
+const dayCount = (from: string, to: string): number =>
+  Math.floor(
+    (new Date(`${to}T00:00:00Z`).getTime() - new Date(`${from}T00:00:00Z`).getTime()) / 86_400_000
+  ) + 1
+
+/**
+ * The previous period, shaped for a per-product comparison.
+ *
+ * This is a second call to the same RPC rather than a widened one that returns
+ * both periods. The reason is that the two windows have to be summed
+ * INDEPENDENTLY: a single query spanning both would have to carry a
+ * period-discriminating column through every fold, and every existing caller
+ * would pay for a feature it does not use. Two ranged calls cost one extra
+ * round trip and leave the shared function exactly as it was.
+ */
+export async function getComparison(
+  db: SupabaseClient,
+  feedId: string,
+  days: number,
+  actions: ActionChoice = NO_ACTIONS,
+  syncedFrom?: string | null
+): Promise<Comparison> {
+  const range = previousRange(days)
+  const { rows, totals } = await getProductPerformance(db, feedId, days, actions, range)
+
+  const byProduct = new Map<string, RawTotals & Derived>()
+  for (const r of rows) {
+    if (!r.productRef) continue
+    byProduct.set(r.productRef, r)
+  }
+
+  const wanted = dayCount(range.from, range.to)
+  const covered =
+    syncedFrom && syncedFrom > range.from
+      ? Math.max(0, dayCount(syncedFrom, range.to))
+      : wanted
+
+  return {
+    ...range,
+    totals,
+    byProduct,
+    partial: covered < wanted,
+    coveredDays: Math.min(covered, wanted),
+  }
+}
+
+export type DailyPoint = RawTotals & Derived & { date: string }
+
+/**
+ * One point per day with data, for the trend strip.
+ *
+ * Days the account did not run are NOT filled in with zeroes: a gap is a real
+ * fact and a synthesised zero would draw a line through it. Callers that need a
+ * continuous axis should place the points by date rather than by index.
+ */
+export async function getDailyTotals(
+  db: SupabaseClient,
+  feedId: string,
+  days: number,
+  actions: ActionChoice = NO_ACTIONS,
+  range?: DateRange
+): Promise<DailyPoint[]> {
+  const { from, to } = range ?? windowRange(days)
+
+  const { data, error } = await db.rpc('google_ads_daily_totals', {
+    p_feed_id: feedId,
+    p_from: from,
+    p_to: to,
+    p_roas_actions: actions.roas,
+    p_poas_actions: actions.poas,
+  })
+  if (error) dbError('getDailyTotals', error)
+
+  const poasTracked = actions.poas.length > 0
+
+  return ((data ?? []) as Record<string, unknown>[]).map((r) => {
+    const raw = rawFrom(r)
+    return { ...raw, ...derive(raw, poasTracked), date: String(r.date ?? '') }
   })
 }
 

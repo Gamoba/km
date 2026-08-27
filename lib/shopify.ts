@@ -1,7 +1,3 @@
-// Pin to a version Shopify still supports. 2025-07 has been retired: requests
-// against it are answered by 2025-10 anyway (verified via the served
-// X-Shopify-Api-Version header), so the old value only hid which schema we were
-// actually talking to. Bumping is a no-op at runtime and makes the pin honest.
 export const API_VERSION = '2025-10'
 
 function sleep(ms: number): Promise<void> {
@@ -13,10 +9,6 @@ function parseGid(gid: string): number {
   return match ? parseInt(match[1], 10) : 0
 }
 
-// The order archive keeps ids as TEXT, matching product_ref / variant_ref in the
-// rest of the schema, so a gid becomes the trailing number as a string rather
-// than going through parseGid's number (which turns an unparseable id into 0 —
-// a valid-looking key that silently collides).
 function refOf(gid: string): string {
   const match = gid.match(/\/(\d+)$/)
   return match ? match[1] : gid
@@ -223,6 +215,25 @@ type VariantCostsResponse = {
       }>
     }
   } | null>
+}
+
+/**
+ * One place a shop holds stock.
+ *
+ * Fetched so the app can tell whether variants[].inventory_quantity is a total
+ * across several places. A market-scoped feed cannot assume all of a multi-
+ * location total is reachable from its own market, and the only honest move is
+ * to say so — which requires knowing the count.
+ *
+ * `shipsInventory` and `active` both matter: a location that is inactive, or
+ * that exists only as a pickup point, does not contribute sellable stock, so
+ * counting it would raise a warning about ambiguity that isn't there.
+ */
+export type ShopifyLocationInfo = {
+  id: string
+  name: string
+  active: boolean
+  shipsInventory: boolean
 }
 
 export type VariantCost = {
@@ -638,6 +649,12 @@ export type ShopifyClient = {
     country?: string
   ) => Promise<ShopifyData>
   fetchMarkets: () => Promise<ShopifyMarket[]>
+  /**
+   * Every location the shop holds stock at. Returns an empty array on failure
+   * rather than throwing: not knowing the locations must not be able to break
+   * a product sync, and "unknown" is already a state the readers handle.
+   */
+  fetchLocations: () => Promise<ShopifyLocationInfo[]>
   /** Per-variant "Cost per item". Absent cost stays null, never 0. */
   fetchVariantCostsBulk: (productIds: number[]) => Promise<VariantCost[]>
   /**
@@ -830,6 +847,42 @@ export function createShopifyClient({ shopUrl, accessToken }: ShopifyCredentials
     }
 
     return map
+  }
+
+  async function fetchLocations(): Promise<ShopifyLocationInfo[]> {
+    // One request, no pagination: a shop with more than 50 stocking locations
+    // is far outside what this feature is trying to disambiguate, and the
+    // answer there ("many") is the same as the answer at 3.
+    try {
+      const data = await shopifyGraphQL<{
+        locations: {
+          nodes: Array<{
+            id: string
+            name: string
+            isActive: boolean
+            shipsInventory: boolean
+          }>
+        }
+      }>(
+        `query Locations {
+          locations(first: 50, includeInactive: true) {
+            nodes { id name isActive shipsInventory }
+          }
+        }`
+      )
+
+      return (data.locations?.nodes ?? []).map((l) => ({
+        id: l.id,
+        name: l.name,
+        active: Boolean(l.isActive),
+        shipsInventory: Boolean(l.shipsInventory),
+      }))
+    } catch (err) {
+      // Same posture as the other auxiliary fetches: this is context, not the
+      // payload. Losing it degrades a warning label, not the sync.
+      console.error(`Shopify: fetchLocations fejlede — ${err}`)
+      return []
+    }
   }
 
   async function fetchVariantCostsBulk(productIds: number[]): Promise<VariantCost[]> {
@@ -1556,6 +1609,7 @@ export function createShopifyClient({ shopUrl, accessToken }: ShopifyCredentials
     fetchProductsWithAllData,
     fetchProductsLocalized,
     fetchMarkets,
+    fetchLocations,
     fetchVariantCostsBulk,
     fetchOrdersPage,
     probeShopifyAccess,

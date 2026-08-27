@@ -3,6 +3,7 @@ import { createSupabaseServerClient } from '@/lib/supabase-server'
 import { adminDb, getOwnedFeed } from '@/lib/feeds'
 import { getVariantPerformance, windowRange } from '@/lib/googleAdsAnalytics'
 import { getReturnsForFeed } from '@/lib/returnsAnalytics'
+import { getStockForFeed } from '@/lib/inventoryAnalytics'
 import { errorResponse } from '@/lib/errors'
 
 // GET — variant-level rows for one product, loaded when a row is expanded.
@@ -70,7 +71,40 @@ export async function GET(
       }
     }
 
-    return NextResponse.json({ variants, returns: returnsByVariant })
+    // ── Stock for EVERY variant of this product, not just the ones with ads ──
+    //
+    // Deliberately keyed off the catalogue rather than off `variants` above.
+    // The performance rows only contain variants Google reported on, and a
+    // variant that is out of stock has usually stopped being served — Merchant
+    // Center drops an unavailable offer — so the ones the operator most wants
+    // named are exactly the ones missing from the ads data. Sending the full
+    // set lets the client annotate the rows it has AND name the ones it does
+    // not, instead of showing "2 of 5 out of stock" above a list where every
+    // listed variant is in stock.
+    const stock = await getStockForFeed(db, feedId, { productRef })
+
+    const stockByVariant: Record<
+      string,
+      {
+        title: string | null
+        sku: string | null
+        sellable: boolean
+        quantity: number | null
+        daysOfStock: number | null
+      }
+    > = {}
+    for (const [ref, s] of stock.byVariant) {
+      if (s.productRef !== productRef) continue
+      stockByVariant[ref] = {
+        title: s.title,
+        sku: s.sku,
+        sellable: s.sellable,
+        quantity: s.quantity,
+        daysOfStock: s.daysOfStock,
+      }
+    }
+
+    return NextResponse.json({ variants, returns: returnsByVariant, stock: stockByVariant })
   } catch (err) {
     return errorResponse(err, 'GET /api/google-ads/[feedId]/variants')
   }

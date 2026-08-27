@@ -59,6 +59,9 @@ const METRIC_LABEL: Record<BucketMetric, string> = {
   impressions: 'Impressions',
   profit_after_ad_spend: 'Profit − cost',
   cogs_margin: 'Margin (COGS)',
+  inventory_quantity: 'Stock (units)',
+  stock_coverage: 'Stock coverage',
+  days_of_stock: 'Days of stock',
 }
 
 const OPERATORS: { value: BucketOperator; label: string; needsValue: boolean }[] = [

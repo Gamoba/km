@@ -4,6 +4,7 @@ import { useRouter } from 'next/navigation'
 import { Fragment, useMemo, useState } from 'react'
 import {
   breakEvenRoas,
+  delta,
   formatInt,
   formatMoney,
   formatPercent,
@@ -11,12 +12,22 @@ import {
   vatUplift,
   type ActionChoice,
   type AvailableAction,
+  type Delta,
   type ProductRow,
   type Totals,
   type VariantRow,
   type Window,
 } from '@/lib/googleAdsAnalytics'
+import { STALE_STOCK_DAYS } from '@/lib/inventoryAnalytics'
 import { GoogleAdsSetup } from './GoogleAdsSetup'
+
+/**
+ * Days of stock below which the note is worth drawing attention to.
+ *
+ * Roughly a Google Ads learning cycle: below this, anything you change today
+ * stops mattering before it has finished taking effect.
+ */
+const LOW_STOCK_DAYS = 14
 
 type SettingsView = {
   customerName: string | null
@@ -43,6 +54,8 @@ type Props = {
   availableActions: AvailableAction[]
   activeActions: ActionChoice
   rows: ProductRow[]
+  trend: TrendPoint[]
+  comparison: ComparisonView | null
   margins: Record<string, { margin: number | null; asEntered: number | null; coverage: number }>
   marginCoverage: { withMargin: number; products: number }
   returns: Record<
@@ -50,6 +63,8 @@ type Props = {
     { returnRate: number | null; refundedInWindow: number; sampleUnits: number }
   >
   returnsContext: ReturnsContext | null
+  stock: Record<string, StockView>
+  stockContext: StockContext | null
   vat: {
     pricesIncludeVat: boolean | null
     conversionValueIncludesVat: boolean | null
@@ -58,6 +73,80 @@ type Props = {
   totals: Totals | null
   from: string
   to: string
+}
+
+export type TrendPoint = {
+  date: string
+  cost: number
+  revenue: number
+  profit: number
+  clicks: number
+  roas: number | null
+}
+
+/**
+ * The previous period, reduced to the figures this page compares against.
+ *
+ * `partial` is the load-bearing field: when the earlier window predates the
+ * archive it is only fractionally covered, every delta reads as growth, and the
+ * page has to say so instead of drawing a green arrow. See getComparison.
+ */
+export type ComparisonView = {
+  from: string
+  to: string
+  partial: boolean
+  coveredDays: number
+  totals: {
+    cost: number
+    clicks: number
+    impressions: number
+    roasValue: number
+    poasValue: number
+    roas: number | null
+    poas: number | null
+  }
+  byProduct: Record<
+    string,
+    { cost: number; roasValue: number; roas: number | null; poas: number | null }
+  >
+}
+
+/**
+ * One product's stock, as of the last catalogue sync.
+ *
+ * Every field is nullable for its own reason (lib/inventoryAnalytics.ts), and
+ * the cell below renders each null as silence rather than as a number — an
+ * untracked product is not an empty one.
+ */
+type StockView = {
+  quantity: number | null
+  coverage: number | null
+  daysOfStock: number | null
+  outOfStock: boolean
+  variantsTotal: number
+  variantsSellable: number
+}
+
+/** One variant's stock, as the drill-down receives it. */
+type VariantStockView = {
+  title: string | null
+  sku: string | null
+  sellable: boolean
+  quantity: number | null
+  daysOfStock: number | null
+}
+
+type StockContext = {
+  syncedAt: string | null
+  /** How old the stock figures are. Product sync is manual, so this can be large. */
+  ageDays: number | null
+  velocityFrom: string
+  velocityTo: string
+  velocityDays: number
+  /** Null when the shop's locations have never been detected. */
+  locationCount: number | null
+  /** More than one place holding stock, so the quantity is not market-specific. */
+  multipleLocations: boolean
 }
 
 type ReturnsContext = {
@@ -97,6 +186,20 @@ type Row = ProductRow & {
   refundedInWindow: number
   netRoas: number | null
   netPoas: number | null
+  /** Undefined when the product could not be matched to the catalogue at all. */
+  stock: StockView | undefined
+  /** Change vs the previous period. Null when the product had no data then. */
+  dCost: Delta | null
+  dRevenue: Delta | null
+  dRoas: Delta | null
+  /**
+   * Sort keys for the change columns. A product absent from the previous period
+   * sorts LAST via compare()'s null handling rather than as a huge gain — it
+   * did not grow, it appeared, and those are different findings.
+   */
+  dCostPct: number | null
+  dRevenuePct: number | null
+  dRoasAbs: number | null
 }
 
 type SortKey =
@@ -113,6 +216,9 @@ type SortKey =
   | 'netPoas'
   | 'refundedInWindow'
   | 'returnRate'
+  | 'dCostPct'
+  | 'dRevenuePct'
+  | 'dRoasAbs'
 
 const describeActions = (list: string[]): string =>
   list.length === 0 ? 'not selected' : list.map((a) => `«${a}»`).join(' + ')
@@ -138,10 +244,14 @@ export function GoogleAdsClient({
   availableActions,
   activeActions,
   rows,
+  trend,
+  comparison,
   margins,
   marginCoverage,
   returns,
   returnsContext,
+  stock,
+  stockContext,
   vat,
   totals,
   from,
@@ -156,6 +266,17 @@ export function GoogleAdsClient({
   const [variants, setVariants] = useState<Record<string, VariantRow[]>>({})
   const [variantReturns, setVariantReturns] = useState<
     Record<string, { returnRate: number | null; refundedInWindow: number; sampleUnits: number }>
+  >({})
+  // Nested by product, then by variant_ref, covering EVERY variant of the
+  // expanded product including ones with no ad data — see the route.
+  //
+  // NESTED, unlike variantReturns above, and the difference is load-bearing:
+  // this map is ENUMERATED to find unavailable variants missing from the ads
+  // rows. A flat map accumulates across every product opened this session, so
+  // enumerating it would list one product's out-of-stock variants underneath
+  // another. Returns are only ever looked up by key, so they can stay flat.
+  const [variantStock, setVariantStock] = useState<
+    Record<string, Record<string, VariantStockView>>
   >({})
   const [loadingVariants, setLoadingVariants] = useState<string | null>(null)
   const [syncing, setSyncing] = useState(false)
@@ -186,6 +307,16 @@ export function GoogleAdsClient({
   const uplift = vatUplift(vat.conversionValueIncludesVat, vat.rate)
 
   const [showReturns, setShowReturns] = useState(false)
+  const [showCompare, setShowCompare] = useState(false)
+
+  // Product sync is manual, so a stock figure can be arbitrarily old while
+  // looking exactly as current as everything else on the page. Past the
+  // threshold the notes are drawn in amber rather than hidden — directionally
+  // useful and openly stale beats absent.
+  const stockStale =
+    stockContext?.ageDays !== null &&
+    stockContext?.ageDays !== undefined &&
+    stockContext.ageDays > STALE_STOCK_DAYS
 
   const sorted = useMemo(() => {
     const merged: Row[] = rows.map((r) => {
@@ -196,7 +327,21 @@ export function GoogleAdsClient({
       const rate = ret?.returnRate ?? null
       const kept = rate === null ? null : 1 - rate
 
+      // Absent from the previous period is NOT zero: a product that first
+      // served this month has no baseline, and delta() returning null keeps it
+      // out of every change column instead of crediting it with infinite growth.
+      const prev = r.productRef ? comparison?.byProduct[r.productRef] : undefined
+      const dCost = delta(r.cost, prev?.cost ?? null)
+      const dRevenue = delta(r.roas_value, prev?.roasValue ?? null)
+      const dRoas = delta(r.roas, prev?.roas ?? null)
+
       return {
+        dCost,
+        dRevenue,
+        dRoas,
+        dCostPct: dCost?.pct ?? null,
+        dRevenuePct: dRevenue?.pct ?? null,
+        dRoasAbs: dRoas?.abs ?? null,
         ...r,
         margin: value,
         // NOT `value`: break-even is compared against a real ROAS, so it has to
@@ -212,11 +357,12 @@ export function GoogleAdsClient({
         refundedInWindow: ret?.refundedInWindow ?? 0,
         netRoas: kept === null || r.roas === null ? null : r.roas * kept,
         netPoas: kept === null || r.poas === null ? null : r.poas * kept,
+        stock: r.productRef ? stock[r.productRef] : undefined,
       }
     })
     merged.sort((a, b) => compare(a[sortKey], b[sortKey], sortDir))
     return merged
-  }, [rows, margins, returns, sortKey, sortDir, grossBasis, uplift])
+  }, [rows, margins, returns, stock, comparison, sortKey, sortDir, grossBasis, uplift])
 
   const visible = useMemo(() => {
     const terms = query.toLowerCase().split(/\s+/).filter(Boolean)
@@ -270,6 +416,7 @@ export function GoogleAdsClient({
       if (res.ok) {
         setVariants((v) => ({ ...v, [productRef]: json.variants ?? [] }))
         setVariantReturns((v) => ({ ...v, ...(json.returns ?? {}) }))
+        setVariantStock((v) => ({ ...v, [productRef]: json.stock ?? {} }))
       }
     } finally {
       setLoadingVariants(null)
@@ -313,6 +460,9 @@ export function GoogleAdsClient({
       const warnings: string[] = json.result?.warnings ?? []
       if (warnings.length) setSyncNote(warnings.join(' '))
       setVariants({})
+      // Stock is re-read by the same request, so a stale copy would otherwise
+      // outlive the numbers it was fetched alongside.
+      setVariantStock({})
       router.refresh()
     } catch {
       setSyncError('Could not reach the server')
@@ -505,14 +655,34 @@ export function GoogleAdsClient({
 
         {connected && totals && (
           <section className="grid gap-3" style={{ gridTemplateColumns: 'repeat(auto-fit,minmax(150px,1fr))' }}>
-            <Stat label="Cost" value={formatMoney(totals.cost, currency)} />
-            <Stat label="Revenue" value={formatMoney(totals.roas_value, currency)} />
+            {/* Cost rising is not good news, so its arrow is inverted. Everything
+                else on this row is a figure you want larger. */}
+            <Stat
+              label="Cost"
+              value={formatMoney(totals.cost, currency)}
+              change={delta(totals.cost, comparison?.totals.cost ?? null)}
+              invertChange
+              suppressChange={comparison?.partial}
+            />
+            <Stat
+              label="Revenue"
+              value={formatMoney(totals.roas_value, currency)}
+              change={delta(totals.roas_value, comparison?.totals.roasValue ?? null)}
+              suppressChange={comparison?.partial}
+            />
             <Stat
               label="ROAS"
               value={formatRatio(totals.roas)}
               tone={totals.roas === null ? undefined : totals.roas >= 1 ? 'good' : 'bad'}
+              change={delta(totals.roas, comparison?.totals.roas ?? null)}
+              suppressChange={comparison?.partial}
             />
-            <Stat label="Gross profit" value={formatMoney(totals.poas_value, currency)} />
+            <Stat
+              label="Gross profit"
+              value={formatMoney(totals.poas_value, currency)}
+              change={delta(totals.poas_value, comparison?.totals.poasValue ?? null)}
+              suppressChange={comparison?.partial}
+            />
             <Stat
               label="POAS"
               value={formatRatio(totals.poas)}
@@ -522,9 +692,38 @@ export function GoogleAdsClient({
                   ? 'Below 1 = ads cost more than the gross profit they return'
                   : undefined
               }
+              change={delta(totals.poas, comparison?.totals.poas ?? null)}
+              suppressChange={comparison?.partial}
             />
-            <Stat label="Clicks" value={formatInt(totals.clicks)} />
+            <Stat
+              label="Clicks"
+              value={formatInt(totals.clicks)}
+              change={delta(totals.clicks, comparison?.totals.clicks ?? null)}
+              suppressChange={comparison?.partial}
+            />
           </section>
+        )}
+
+        {connected && trend.length > 1 && (
+          <Trend points={trend} currency={currency} days={days} />
+        )}
+
+        {connected && comparison?.partial && (
+          <div className="wl-card" style={{ padding: '14px 18px' }}>
+            <div className="flex items-start gap-2.5">
+              <span
+                className="wl-dot shrink-0"
+                style={{ background: 'var(--accent-amber)', marginTop: '5px' }}
+              />
+              <p style={{ fontSize: '12px', color: 'var(--ink-secondary)', lineHeight: 1.5 }}>
+                Change figures are hidden: the comparison period {comparison.from} →{' '}
+                {comparison.to} is only {comparison.coveredDays} day
+                {comparison.coveredDays === 1 ? '' : 's'} deep in the archive, so every metric
+                would appear to have grown. Pick a shorter window, or raise the sync window in
+                Settings and refetch.
+              </p>
+            </div>
+          </div>
         )}
 
         {/* ── Table ──────────────────────────────────────────────── */}
@@ -596,6 +795,27 @@ export function GoogleAdsClient({
                     Returns
                   </label>
                 )}
+                {comparison && !comparison.partial && (
+                  <label
+                    style={{
+                      fontSize: '12px',
+                      color: 'var(--ink-secondary)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '6px',
+                      whiteSpace: 'nowrap',
+                    }}
+                    title={`Adds change columns against ${comparison.from} → ${comparison.to}, the equal-length period immediately before this one.`}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={showCompare}
+                      onChange={(e) => setShowCompare(e.target.checked)}
+                      style={{ accentColor: 'var(--accent-purple)' }}
+                    />
+                    Compare
+                  </label>
+                )}
                 <SearchBox value={query} onChange={setQuery} placeholder="Search products…" />
               </div>
             </div>
@@ -613,6 +833,16 @@ export function GoogleAdsClient({
                     <Th sortable active={sortKey === 'cost'} dir={sortDir} onClick={() => setSort('cost')}>
                       Cost
                     </Th>
+                    {showCompare && (
+                      <Th
+                        sortable
+                        active={sortKey === 'dCostPct'}
+                        dir={sortDir}
+                        onClick={() => setSort('dCostPct')}
+                      >
+                        Δ Cost
+                      </Th>
+                    )}
                     <Th sortable active={sortKey === 'margin'} dir={sortDir} onClick={() => setSort('margin')}>
                       Margin
                     </Th>
@@ -620,9 +850,29 @@ export function GoogleAdsClient({
                       Revenue
                       <CountPill n={activeActions.roas.length} />
                     </Th>
+                    {showCompare && (
+                      <Th
+                        sortable
+                        active={sortKey === 'dRevenuePct'}
+                        dir={sortDir}
+                        onClick={() => setSort('dRevenuePct')}
+                      >
+                        Δ Revenue
+                      </Th>
+                    )}
                     <Th sortable active={sortKey === 'roas'} dir={sortDir} onClick={() => setSort('roas')}>
                       ROAS
                     </Th>
+                    {showCompare && (
+                      <Th
+                        sortable
+                        active={sortKey === 'dRoasAbs'}
+                        dir={sortDir}
+                        onClick={() => setSort('dRoasAbs')}
+                      >
+                        Δ ROAS
+                      </Th>
+                    )}
                     {showReturns && (
                       <Th sortable active={sortKey === 'netRoas'} dir={sortDir} onClick={() => setSort('netRoas')}>
                         Net ROAS
@@ -712,7 +962,10 @@ export function GoogleAdsClient({
                                       not found in the catalogue
                                     </span>
                                   ) : (
-                                    `${r.variantCount} variant${r.variantCount === 1 ? '' : 's'}`
+                                    <>
+                                      {`${r.variantCount} variant${r.variantCount === 1 ? '' : 's'}`}
+                                      <StockNote stock={r.stock} stale={stockStale} />
+                                    </>
                                   )}
                                 </div>
                               </div>
@@ -721,13 +974,31 @@ export function GoogleAdsClient({
                           <Td>{formatInt(r.impressions)}</Td>
                           <Td>{formatInt(r.clicks)}</Td>
                           <Td>{formatMoney(r.cost, currency)}</Td>
+                          {showCompare && (
+                            <Td>
+                              <Cell d={r.dCost} invert />
+                            </Td>
+                          )}
                           <Td>
                             <Margin value={r.margin} coverage={r.marginCoverage} />
                           </Td>
                           <Td>{formatMoney(r.roas_value, currency)}</Td>
+                          {showCompare && (
+                            <Td>
+                              <Cell d={r.dRevenue} />
+                            </Td>
+                          )}
                           <Td>
                             <Ratio value={r.roas} />
                           </Td>
+                          {showCompare && (
+                            <Td>
+                              {/* Shown as an absolute move, not a percentage:
+                                  ROAS is already a ratio, and "+40 %" of a ratio
+                                  is a second-order figure nobody reasons in. */}
+                              <Cell d={r.dRoas} absolute digits={2} />
+                            </Td>
+                          )}
                           {showReturns && (
                             <Td>
                               <NetRatio value={r.netRoas} rate={r.returnRate} sample={r.returnSample} />
@@ -786,7 +1057,7 @@ export function GoogleAdsClient({
                         {isOpen && (
                           <tr>
                             <td
-                              colSpan={showReturns ? 14 : 11}
+                              colSpan={(showReturns ? 14 : 11) + (showCompare ? 3 : 0)}
                               style={{ background: 'var(--bg-surface)', padding: '0 18px 14px 40px' }}
                             >
                               {loadingVariants === r.productRef ? (
@@ -799,6 +1070,8 @@ export function GoogleAdsClient({
                                   currency={currency}
                                   returns={variantReturns}
                                   showReturns={showReturns}
+                                  stock={variantStock[r.productRef ?? ''] ?? {}}
+                                  stale={stockStale}
                                 />
                               )}
                             </td>
@@ -855,6 +1128,16 @@ export function GoogleAdsClient({
               payment fees and overhead come out after it, so a product sitting just above
               break-even is not yet making money.
             </p>
+            {comparison && (
+              <p>
+                Change figures compare {from} → {to} with {comparison.from} → {comparison.to} —
+                the equal-length period immediately before, with no gap and no overlap. A dash
+                means the product had no data in the earlier period, which is a start rather than
+                a change; those sort last rather than as the largest gain. Δ ROAS is an absolute
+                move, so &laquo;+0,80&raquo; means the ratio rose by 0,80.
+              </p>
+            )}
+            {stockContext && <StockBasisNote ctx={stockContext} stale={stockStale} />}
             <VatNote feedId={feedId} vat={vat} uplift={uplift} grossBasis={grossBasis} />
             {showReturns && returnsContext && (
               <ReturnsNote ctx={returnsContext} currency={currency} />
@@ -882,11 +1165,19 @@ function Stat({
   value,
   tone,
   hint,
+  change,
+  invertChange,
+  suppressChange,
 }: {
   label: string
   value: string
   tone?: 'good' | 'bad'
   hint?: string
+  change?: Delta | null
+  /** For metrics where UP is bad — cost, refunds. */
+  invertChange?: boolean
+  /** Set when the comparison period is too thin to draw a conclusion from. */
+  suppressChange?: boolean
 }) {
   return (
     <div className="wl-card" style={{ padding: '16px 18px' }}>
@@ -903,12 +1194,184 @@ function Stat({
       >
         {value}
       </div>
+      {!suppressChange && change && (
+        <div style={{ marginTop: '5px' }}>
+          <Change d={change} invert={invertChange} />
+        </div>
+      )}
       {hint && (
         <div style={{ fontSize: '11px', color: 'var(--ink-muted)', marginTop: '4px', lineHeight: 1.4 }}>
           {hint}
         </div>
       )}
     </div>
+  )
+}
+
+/**
+ * A period-over-period change.
+ *
+ * Two rules it exists to enforce, both of which were easy to get wrong:
+ *
+ *   DIRECTION IS NOT SENTIMENT. Cost rising and ROAS rising are both "up" and
+ *   only one is good news, so `invert` decides the colour rather than the sign.
+ *
+ *   NO PERCENTAGE FROM A ZERO BASE. A product that spent nothing last period
+ *   and something this period has not grown by any percentage; it started. That
+ *   reads as "new" and the absolute figure sits in the tooltip.
+ */
+function Change({ d, invert = false }: { d: Delta; invert?: boolean }) {
+  if (d.abs === 0) {
+    return <span style={{ fontSize: '11px', color: 'var(--ink-muted)' }}>no change</span>
+  }
+  const up = d.abs > 0
+  const good = invert ? !up : up
+  const abs = d.abs.toLocaleString('da-DK', { maximumFractionDigits: 2 })
+  return (
+    <span
+      style={{
+        fontSize: '11px',
+        color: good ? 'var(--accent-green)' : 'var(--accent-red)',
+        fontVariantNumeric: 'tabular-nums',
+        whiteSpace: 'nowrap',
+      }}
+      title={`${up ? '+' : ''}${abs} vs the previous period`}
+    >
+      {up ? '▲' : '▼'}{' '}
+      {d.pct === null
+        ? 'new'
+        : `${d.pct > 0 ? '+' : ''}${(d.pct * 100).toLocaleString('da-DK', {
+            maximumFractionDigits: 0,
+          })} %`}
+    </span>
+  )
+}
+
+/**
+ * Daily cost against daily revenue, over the selected window.
+ *
+ * Deliberately a bar strip and not a line: the series has GAPS — a day the
+ * account did not serve produces no row at all — and a line would interpolate
+ * straight through them, inventing spend on days that had none. Bars can simply
+ * be absent.
+ *
+ * Both series share one vertical scale, because the whole point of putting them
+ * together is seeing revenue sit above or below cost. Scaling each to its own
+ * maximum would make every account look break-even.
+ */
+function Trend({
+  points,
+  currency,
+  days,
+}: {
+  points: TrendPoint[]
+  currency: string
+  days: Window
+}) {
+  const max = Math.max(...points.map((p) => Math.max(p.cost, p.revenue)), 0)
+  if (max <= 0) return null
+
+  // A day is only worth its own hover target if there is room for one. Beyond
+  // ~120 days the bars are sub-pixel and the strip becomes a shape, not a chart.
+  const dense = points.length > 120
+
+  return (
+    <section className="wl-card" style={{ padding: '16px 18px' }}>
+      <div className="flex items-baseline justify-between gap-3 flex-wrap">
+        <div className="wl-eyebrow">Daily cost and revenue</div>
+        <div className="flex items-center gap-3" style={{ fontSize: '11px', color: 'var(--ink-muted)' }}>
+          <span className="flex items-center gap-1.5">
+            <span
+              style={{
+                width: '8px',
+                height: '8px',
+                borderRadius: '2px',
+                background: 'var(--accent-purple)',
+                display: 'inline-block',
+              }}
+            />
+            Cost
+          </span>
+          <span className="flex items-center gap-1.5">
+            <span
+              style={{
+                width: '8px',
+                height: '8px',
+                borderRadius: '2px',
+                background: 'var(--accent-green)',
+                display: 'inline-block',
+              }}
+            />
+            Revenue
+          </span>
+          <span>last {days} days</span>
+        </div>
+      </div>
+
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'flex-end',
+          gap: dense ? '1px' : '2px',
+          height: '90px',
+          marginTop: '12px',
+        }}
+      >
+        {points.map((p) => (
+          <div
+            key={p.date}
+            style={{
+              flex: 1,
+              display: 'flex',
+              alignItems: 'flex-end',
+              gap: '1px',
+              height: '100%',
+              minWidth: 0,
+            }}
+            title={
+              dense
+                ? undefined
+                : `${p.date}\nCost ${formatMoney(p.cost, currency)}\nRevenue ${formatMoney(
+                    p.revenue,
+                    currency
+                  )}\nROAS ${formatRatio(p.roas)}`
+            }
+          >
+            <div
+              style={{
+                flex: 1,
+                height: `${(p.cost / max) * 100}%`,
+                background: 'var(--accent-purple)',
+                borderRadius: '1px 1px 0 0',
+                minHeight: p.cost > 0 ? '1px' : 0,
+              }}
+            />
+            <div
+              style={{
+                flex: 1,
+                height: `${(p.revenue / max) * 100}%`,
+                background: 'var(--accent-green)',
+                borderRadius: '1px 1px 0 0',
+                minHeight: p.revenue > 0 ? '1px' : 0,
+              }}
+            />
+          </div>
+        ))}
+      </div>
+
+      <div
+        className="flex justify-between"
+        style={{ fontSize: '11px', color: 'var(--ink-muted)', marginTop: '6px' }}
+      >
+        <span>{points[0]?.date}</span>
+        {/* Days with no activity are absent rather than zero, so the count is
+            worth stating: a 30-day window showing 22 bars is a finding. */}
+        <span>
+          {points.length} day{points.length === 1 ? '' : 's'} with data
+        </span>
+        <span>{points[points.length - 1]?.date}</span>
+      </div>
+    </section>
   )
 }
 
@@ -1455,6 +1918,109 @@ function SearchBox({
   )
 }
 
+/**
+ * What the stock notes rest on, said once beneath the table.
+ *
+ * Three separate caveats, and each is only printed when it actually applies —
+ * a single-location shop synced this morning gets one short sentence rather
+ * than a paragraph of hedging about problems it does not have.
+ */
+function StockBasisNote({ ctx, stale }: { ctx: StockContext; stale: boolean }) {
+  if (!ctx.syncedAt) {
+    return (
+      <p style={{ color: 'var(--accent-amber)' }}>
+        Stock has never been read from Shopify for this feed, so no product shows a stock
+        note. Run a product sync to populate it.
+      </p>
+    )
+  }
+
+  return (
+    <p style={stale ? { color: 'var(--accent-amber)' } : undefined}>
+      Stock is as of {new Date(ctx.syncedAt).toLocaleString('da-DK')}
+      {ctx.ageDays !== null && ctx.ageDays > 0
+        ? ` — ${ctx.ageDays} day${ctx.ageDays === 1 ? '' : 's'} ago`
+        : ''}
+      {stale && ', which is old enough that it may have moved since'}. Days of stock is units
+      on hand divided by sales over the last {ctx.velocityDays} days, and is only shown once a
+      product has sold enough for the rate to mean something — products below that, and
+      products Shopify does not track stock for, show nothing rather than a zero.
+      {ctx.multipleLocations && ctx.locationCount !== null && (
+        <>
+          {' '}
+          This shop holds stock at {ctx.locationCount} locations and the quantity is the total
+          across all of them, so not all of it is necessarily available to this feed&apos;s
+          market.
+        </>
+      )}
+      {ctx.locationCount === null && (
+        <> The shop&apos;s locations have not been detected yet, so it is not known whether
+        this quantity spans more than one.</>
+      )}
+    </p>
+  )
+}
+
+/**
+ * Stock, folded into the line that already carries the variant count.
+ *
+ * DELIBERATELY NOT A COLUMN. The table is already fourteen columns wide, and
+ * stock is not a result to be compared across products — it is a constraint on
+ * whether this row's numbers can still be acted on. It belongs beside the
+ * product's identity, not among its metrics.
+ *
+ * SILENT WHEN THERE IS NOTHING TO SAY. A fully stocked product with a long
+ * runway renders nothing at all: every row shouting "in stock" would train the
+ * eye to skip the line where it matters. Only the two findings speak — some of
+ * it cannot be bought, or what is left runs out soon.
+ */
+function StockNote({ stock, stale }: { stock: StockView | undefined; stale: boolean }) {
+  if (!stock) return null
+
+  // Every branch below reads a value that is null when unknown, so an untracked
+  // or unmeasurable product falls through and says nothing — rather than
+  // claiming a stock of zero, which is what its raw Shopify payload says.
+  const parts: string[] = []
+
+  if (stock.outOfStock) {
+    parts.push('out of stock')
+  } else if (stock.coverage !== null && stock.coverage < 1) {
+    const gone = stock.variantsTotal - stock.variantsSellable
+    parts.push(`${gone} of ${stock.variantsTotal} out of stock`)
+    // Only when some of it can still be bought: "out of stock, 0 days of
+    // stock" says the same thing twice and the second half is noise.
+  }
+
+  if (!stock.outOfStock && stock.daysOfStock !== null && stock.daysOfStock < LOW_STOCK_DAYS) {
+    parts.push(`${Math.floor(stock.daysOfStock)} days of stock`)
+  }
+
+  if (!parts.length) return null
+
+  // Everything reaching here is a finding, so it is all amber. Staleness is
+  // marked with an asterisk instead of a second colour — the same convention
+  // the break-even column already uses for an unverified VAT basis, and one
+  // more colour would compete with the red/green that carries the verdicts.
+  return (
+    <span
+      style={{ color: 'var(--accent-amber)' }}
+      title={
+        stale
+          ? `Stock was last read from Shopify more than ${STALE_STOCK_DAYS} days ago, so it may have moved since.`
+          : undefined
+      }
+    >
+      {parts.map((text, i) => (
+        <span key={i}>
+          {' · '}
+          {text}
+          {stale && '*'}
+        </span>
+      ))}
+    </span>
+  )
+}
+
 function Margin({ value, coverage }: { value: number | null; coverage: number }) {
   if (value === null) {
     return <span style={{ color: 'var(--ink-muted)' }}>—</span>
@@ -1613,6 +2179,55 @@ function Td({ children, style }: { children: React.ReactNode; style?: React.CSSP
   )
 }
 
+/**
+ * A change inside a table cell.
+ *
+ * Quieter than the Stat card version on purpose — a column of these is read by
+ * scanning for colour, and a full-strength green on every row would compete
+ * with the numbers it is annotating.
+ *
+ * A dash means the product had no data in the comparison period. That is
+ * different from "no change", and the two must never look alike: one says it
+ * did not move, the other says there is nothing to compare against.
+ */
+function Cell({
+  d,
+  invert = false,
+  absolute = false,
+  digits = 0,
+}: {
+  d: Delta | null
+  invert?: boolean
+  absolute?: boolean
+  digits?: number
+}) {
+  if (!d) return <span style={{ color: 'var(--ink-muted)' }}>—</span>
+  if (d.abs === 0) return <span style={{ color: 'var(--ink-muted)' }}>0</span>
+
+  const up = d.abs > 0
+  const good = invert ? !up : up
+  const text =
+    absolute || d.pct === null
+      ? `${up ? '+' : ''}${d.abs.toLocaleString('da-DK', {
+          minimumFractionDigits: digits,
+          maximumFractionDigits: digits,
+        })}`
+      : `${up ? '+' : ''}${(d.pct * 100).toLocaleString('da-DK', { maximumFractionDigits: 0 })} %`
+
+  return (
+    <span
+      style={{ color: good ? 'var(--accent-green)' : 'var(--accent-red)' }}
+      title={
+        d.pct === null
+          ? 'No comparable figure in the previous period — this is a start, not a percentage change.'
+          : `${up ? '+' : ''}${d.abs.toLocaleString('da-DK', { maximumFractionDigits: 2 })} in absolute terms`
+      }
+    >
+      {text}
+    </span>
+  )
+}
+
 function Ratio({ value }: { value: number | null }) {
   if (value === null) return <span style={{ color: 'var(--ink-muted)' }}>—</span>
   return (
@@ -1633,13 +2248,28 @@ function VariantTable({
   currency,
   returns,
   showReturns,
+  stock,
+  stale,
 }: {
   rows: VariantRow[]
   currency: string
   returns: Record<string, { returnRate: number | null; refundedInWindow: number; sampleUnits: number }>
   showReturns: boolean
+  /** Every variant of this product, including ones with no ad data. */
+  stock: Record<string, VariantStockView>
+  stale: boolean
 }) {
-  if (!rows.length) {
+  // Out of stock AND absent from the performance rows above. Usually the same
+  // set: Merchant Center stops serving an unavailable offer, so it drops out of
+  // the ads report — which is exactly why naming them here matters. Without
+  // this the parent row can say "2 of 5 out of stock" above a list in which
+  // every variant looks fine.
+  const shown = new Set(rows.map((v) => v.variantRef).filter(Boolean) as string[])
+  const missingUnavailable = Object.entries(stock)
+    .filter(([ref, s]) => !s.sellable && !shown.has(ref))
+    .map(([, s]) => s)
+
+  if (!rows.length && !missingUnavailable.length) {
     return (
       <p style={{ fontSize: '12px', color: 'var(--ink-muted)', padding: '10px 0' }}>
         No variant data in this period.
@@ -1647,6 +2277,7 @@ function VariantTable({
     )
   }
   return (
+    <>
     <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
       <tbody>
         {rows
@@ -1656,6 +2287,7 @@ function VariantTable({
             const ret = v.variantRef ? returns[v.variantRef] : undefined
             const rate = ret?.returnRate ?? null
             const kept = rate === null ? null : 1 - rate
+            const st = v.variantRef ? stock[v.variantRef] : undefined
             return (
               <tr key={v.itemId} style={{ borderBottom: '0.5px solid var(--hairline)' }}>
                 <td style={{ padding: '8px 12px 8px 0', color: 'var(--ink-secondary)' }}>
@@ -1663,6 +2295,7 @@ function VariantTable({
                   {v.sku && (
                     <span style={{ color: 'var(--ink-muted)', marginLeft: '8px' }}>{v.sku}</span>
                   )}
+                  <VariantStockTag stock={st} stale={stale} />
                 </td>
                 <Td>{formatInt(v.impressions)}</Td>
                 <Td>{formatInt(v.clicks)}</Td>
@@ -1698,5 +2331,62 @@ function VariantTable({
           })}
       </tbody>
     </table>
+
+    {missingUnavailable.length > 0 && (
+      <p
+        style={{
+          fontSize: '11px',
+          color: 'var(--accent-amber)',
+          padding: '9px 0 2px',
+          lineHeight: 1.5,
+        }}
+      >
+        Out of stock, with no traffic in this period:{' '}
+        {missingUnavailable
+          .map((s) => s.title ?? s.sku ?? 'unnamed variant')
+          .join(' · ')}
+        {stale && '*'}
+        <span style={{ color: 'var(--ink-muted)' }}>
+          {' — '}Google stops serving an offer once it goes unavailable, so these usually
+          disappear from the report rather than showing zero.
+        </span>
+      </p>
+    )}
+    </>
+  )
+}
+
+/**
+ * A variant's stock, beside its name in the drill-down.
+ *
+ * Silent unless there is a finding, for the same reason StockNote is: a column
+ * of "in stock" teaches the eye to skip the line. Unavailable is stated
+ * outright; a short runway is stated only when the variant can still be bought.
+ */
+function VariantStockTag({ stock, stale }: { stock: VariantStockView | undefined; stale: boolean }) {
+  if (!stock) return null
+
+  const label = !stock.sellable
+    ? 'out of stock'
+    : stock.daysOfStock !== null && stock.daysOfStock < LOW_STOCK_DAYS
+      ? `${Math.floor(stock.daysOfStock)} days of stock`
+      : null
+
+  if (!label) return null
+
+  return (
+    <span
+      style={{ color: 'var(--accent-amber)', marginLeft: '8px' }}
+      title={
+        stale
+          ? `Stock was last read from Shopify more than ${STALE_STOCK_DAYS} days ago, so it may have moved since.`
+          : stock.quantity !== null
+            ? `${stock.quantity} in stock`
+            : undefined
+      }
+    >
+      {label}
+      {stale && '*'}
+    </span>
   )
 }

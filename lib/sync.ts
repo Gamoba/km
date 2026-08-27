@@ -1,6 +1,7 @@
 import { createClient } from '@supabase/supabase-js'
 import { createShopifyClientForProject } from '@/lib/projectShopify'
 import type { ShopifyData } from '@/lib/shopify'
+import { readVariantStock } from '@/lib/inventoryAnalytics'
 
 function adminClient() {
   return createClient(
@@ -13,6 +14,8 @@ export type SyncResult = {
   synced: number
   metafields: number
   durationMs: number
+  /** Stock snapshot rows written — i.e. variants whose stock actually changed. */
+  stockChanges: number
 }
 
 export type SupabaseMetafield = {
@@ -242,6 +245,70 @@ export async function syncProducts(feedId: string): Promise<SyncResult> {
     `[sync] cleanup (${staleIds.length} stale produkter, ${staleChunks.length} chunk(s) parallelt): ${tCleanup - tUpsertMfs}ms`
   )
 
+  // ── Stock: record what changed, and where the shop stocks from ──────────
+  //
+  // Deliberately LAST and deliberately non-fatal. Neither of these is part of
+  // the catalogue this function exists to deliver: the products are already
+  // committed above, and a failure here must leave a successful sync
+  // successful. Both readers already treat absence as "unknown", which is the
+  // safe state — unlike a half-written catalogue.
+  //
+  // The snapshot is taken from the payload just upserted, so it records the
+  // stock that this sync actually observed rather than re-reading a table that
+  // another process could have moved underneath it.
+  let stockChanges = 0
+  try {
+    const observedAt = now
+    const stockRows: {
+      product_ref: string
+      variant_ref: string
+      quantity: number | null
+      tracked: boolean
+      policy: string | null
+    }[] = []
+
+    for (const p of products) {
+      const productRef = String(p.id)
+      for (const v of p.variants ?? []) {
+        const stock = readVariantStock(productRef, v as unknown as Record<string, unknown>)
+        if (!stock) continue
+        stockRows.push({
+          product_ref: stock.productRef,
+          variant_ref: stock.variantRef,
+          quantity: stock.quantity,
+          tracked: stock.tracked,
+          policy: stock.oversell ? 'continue' : 'deny',
+        })
+      }
+    }
+
+    if (stockRows.length > 0) {
+      const { data: written, error: stockErr } = await db.rpc('record_variant_stock', {
+        p_feed_id: feedId,
+        p_observed_at: observedAt,
+        p_rows: stockRows,
+      })
+      if (stockErr) throw new Error(stockErr.message)
+      stockChanges = Number(written ?? 0)
+    }
+
+    // Shop-wide, so it lands on the project rather than on this feed. Cheap
+    // enough (one request, no pagination) to refresh on every sync, which keeps
+    // it honest as merchants open and close locations.
+    const locations = await shopify.fetchLocations()
+    if (locations.length > 0) {
+      const { error: locErr } = await db
+        .from('projects')
+        .update({ shopify_locations: locations, locations_synced_at: observedAt })
+        .eq('id', projectId)
+      if (locErr) throw new Error(locErr.message)
+    }
+  } catch (err) {
+    console.error(`[sync] stock/locations fejlede (produkter er gemt) — ${err}`)
+  }
+  const tStock = Date.now()
+  console.log(`[sync] stock: ${stockChanges} ændring(er), ${tStock - tCleanup}ms`)
+
   const totalMs = Date.now() - t0
   console.log(`[sync] TOTAL: ${totalMs}ms`)
 
@@ -249,6 +316,7 @@ export async function syncProducts(feedId: string): Promise<SyncResult> {
     synced: products.length,
     metafields: allMetafields.length,
     durationMs: totalMs,
+    stockChanges,
   }
 }
 

@@ -11,6 +11,7 @@ import {
   resolveActions,
   type Window,
 } from '@/lib/googleAdsAnalytics'
+import { getStockForFeed, stockAgeDays } from '@/lib/inventoryAnalytics'
 import { WasteTables, type WasteRow } from './WasteTables'
 
 const WINDOWS: Window[] = [7, 14, 30, 90, 180, 365]
@@ -99,6 +100,28 @@ export default async function WastedSpendPage({
 
   const losingCost = losing.reduce((n, r) => n + (r.profitAfterAdSpend ?? 0), 0)
 
+  // ── Spend on products that cannot be shipped ────────────────────────────
+  //
+  // FORWARD-LOOKING, AND THE WORDING HAS TO SAY SO. Stock is what it is NOW,
+  // while the spend is the whole window — so a product that sold out yesterday
+  // shows its full 30 days of spend here even though most of it bought
+  // perfectly shippable clicks. The claim is therefore "this is spending on
+  // something that cannot be bought today", never "this money was wasted".
+  // Answering the retrospective question needs stock as it was on each day,
+  // which is what variant_stock_snapshots is quietly collecting for later.
+  const stock = await getStockForFeed(db, feedId)
+
+  const unavailable = matched
+    .filter((r) => r.cost > 0)
+    .map((r) => ({ row: r, stock: r.productRef ? stock.byProduct.get(r.productRef) : undefined }))
+    // Only products whose stock is actually KNOWN and actually gone. An
+    // untracked product has no coverage to fail this test, which is the point.
+    .filter(({ stock: s }) => s !== undefined && s.outOfStock)
+    .map(({ row }) => row)
+    .sort((a, b) => b.cost - a.cost)
+
+  const unavailableCost = unavailable.reduce((n, r) => n + r.cost, 0)
+
   const toRow = (r: (typeof rows)[number]): WasteRow => ({
     productRef: r.productRef,
     title: r.title,
@@ -110,6 +133,7 @@ export default async function WastedSpendPage({
     cost: r.cost,
     poasValue: r.poas_value,
     profitAfterAdSpend: r.profitAfterAdSpend,
+    variantsTotal: r.productRef ? (stock.byProduct.get(r.productRef)?.variantsTotal ?? 0) : 0,
   })
 
   return (
@@ -156,6 +180,10 @@ export default async function WastedSpendPage({
         losing={losing.map(toRow)}
         losingCost={losingCost}
         showLosing={actions.poas.length > 0}
+        unavailable={unavailable.map(toRow)}
+        unavailableCost={unavailableCost}
+        stockSyncedAt={stock.syncedAt}
+        stockAgeDays={stockAgeDays(stock.syncedAt)}
         wastedEmpty={
           <Empty
             title="Every product with spend produced revenue"

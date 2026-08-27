@@ -5,13 +5,21 @@ import { getFeedSettings } from '@/lib/feedGoogleAds'
 import { missingSetup } from '@/lib/googleAdsSync'
 import {
   getAvailableActions,
+  getComparison,
+  getDailyTotals,
   getProductPerformance,
+  getSyncedRange,
   resolveActions,
   type Window,
 } from '@/lib/googleAdsAnalytics'
 import { getProductMargins, marginCoverage, vatBasis } from '@/lib/variantCosts'
 import { getReturnsForFeed } from '@/lib/returnsAnalytics'
 import { getArchiveCoverage } from '@/lib/shopifyOrders'
+import {
+  getStockForFeed,
+  stockAgeDays,
+  stocksFromMultipleLocations,
+} from '@/lib/inventoryAnalytics'
 import { GoogleAdsClient } from './GoogleAdsClient'
 
 const WINDOWS: Window[] = [7, 14, 30, 90, 180, 365]
@@ -87,10 +95,14 @@ export default async function GoogleAdsPage({
         availableActions={[]}
         activeActions={{ roas: [], poas: [] }}
         rows={[]}
+        trend={[]}
+        comparison={null}
         margins={{}}
         marginCoverage={{ withMargin: 0, products: 0 }}
         returns={{}}
         returnsContext={null}
+        stock={{}}
+        stockContext={null}
         vat={{ pricesIncludeVat: null, conversionValueIncludesVat: null, rate: null }}
         totals={null}
         from=""
@@ -103,11 +115,16 @@ export default async function GoogleAdsPage({
 
   const vat = vatBasis(settings ?? {})
 
-  const [{ rows, totals, from, to }, availableActions, margins] = await Promise.all([
-    getProductPerformance(db, feedId, days, actions),
-    getAvailableActions(db, feedId, days),
-    getProductMargins(db, feedId, vat),
-  ])
+  const synced = await getSyncedRange(db, feedId)
+
+  const [{ rows, totals, from, to }, availableActions, margins, trend, comparison] =
+    await Promise.all([
+      getProductPerformance(db, feedId, days, actions),
+      getAvailableActions(db, feedId, days),
+      getProductMargins(db, feedId, vat),
+      getDailyTotals(db, feedId, days, actions),
+      getComparison(db, feedId, days, actions, synced.first),
+    ])
 
   const marginByRef: Record<
     string,
@@ -120,6 +137,32 @@ export default async function GoogleAdsPage({
 
   const returns = await getReturnsForFeed(db, feedId, { from, to })
   const archive = returns.projectId ? await getArchiveCoverage(db, returns.projectId) : null
+
+  // Stock is a property of the catalogue, not of the window being viewed, so it
+  // is read once and does not move when someone switches between 7d and 90d.
+  const stock = await getStockForFeed(db, feedId)
+
+  const stockByRef: Record<
+    string,
+    {
+      quantity: number | null
+      coverage: number | null
+      daysOfStock: number | null
+      outOfStock: boolean
+      variantsTotal: number
+      variantsSellable: number
+    }
+  > = {}
+  for (const [ref, s] of stock.byProduct) {
+    stockByRef[ref] = {
+      quantity: s.quantity,
+      coverage: s.stockCoverage,
+      daysOfStock: s.daysOfStock,
+      outOfStock: s.outOfStock,
+      variantsTotal: s.variantsTotal,
+      variantsSellable: s.variantsSellable,
+    }
+  }
 
   const returnsByRef: Record<
     string,
@@ -157,6 +200,38 @@ export default async function GoogleAdsPage({
       availableActions={availableActions}
       activeActions={actions}
       rows={rows}
+      trend={trend.map((p) => ({
+        date: p.date,
+        cost: p.cost,
+        revenue: p.roas_value,
+        profit: p.poas_value,
+        clicks: p.clicks,
+        roas: p.roas,
+      }))}
+      // Only the fields the table actually compares are handed over. Sending
+      // whole previous-period rows would double the page payload for a feature
+      // that renders three numbers per product.
+      comparison={{
+        from: comparison.from,
+        to: comparison.to,
+        partial: comparison.partial,
+        coveredDays: comparison.coveredDays,
+        totals: {
+          cost: comparison.totals.cost,
+          clicks: comparison.totals.clicks,
+          impressions: comparison.totals.impressions,
+          roasValue: comparison.totals.roas_value,
+          poasValue: comparison.totals.poas_value,
+          roas: comparison.totals.roas,
+          poas: comparison.totals.poas,
+        },
+        byProduct: Object.fromEntries(
+          [...comparison.byProduct].map(([ref, p]) => [
+            ref,
+            { cost: p.cost, roasValue: p.roas_value, roas: p.roas, poas: p.poas },
+          ])
+        ),
+      }}
       margins={marginByRef}
       marginCoverage={{ withMargin: coverage.withMargin, products: coverage.products }}
       returns={returnsByRef}
@@ -172,6 +247,20 @@ export default async function GoogleAdsPage({
         archiveDepthDays: archive?.depthDays ?? null,
         archiveLastRunAt: archive?.lastRunAt ?? null,
         archiveHasGap: archive?.hasPermanentGap ?? true,
+      }}
+      stock={stockByRef}
+      stockContext={{
+        syncedAt: stock.syncedAt,
+        ageDays: stockAgeDays(stock.syncedAt),
+        velocityFrom: stock.velocityFrom,
+        velocityTo: stock.velocityTo,
+        velocityDays: stock.velocityDays,
+        // Null means nobody has looked, which the UI states as such rather than
+        // implying the quantity is specific to this feed's market.
+        locationCount: stock.locations
+          ? stock.locations.filter((l) => l.active && l.shipsInventory).length
+          : null,
+        multipleLocations: stocksFromMultipleLocations(stock.locations),
       }}
       vat={{
         pricesIncludeVat: settings?.prices_include_vat ?? null,

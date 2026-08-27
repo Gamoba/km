@@ -1,27 +1,3 @@
-// Pulls per-product performance from Google Ads into google_ads_product_daily
-// (cost/clicks/impressions) and google_ads_product_conversions (every conversion
-// action, per product per day).
-//
-// Read-only against Google (GAQL SELECT via lib/googleAds, which refuses
-// anything else); writes only to Supabase.
-//
-// THREE THINGS THAT ARE EASY TO GET WRONG, AND WHY THIS DOES THEM THIS WAY:
-//
-// 1. ROLLING RE-FETCH, NOT APPEND. Google attributes conversions RETROACTIVELY —
-//    a sale today can be credited to a click three weeks ago, changing that day's
-//    numbers long after it passed. Appending only new days would permanently
-//    understate history, so every run re-pulls the whole window and upserts.
-//
-// 2. EVERY CONVERSION ACTION IS STORED, none is chosen here. What an account
-//    calls its conversion value differs wildly — revenue in one, gross profit in
-//    another, phone calls in a third, and often a view_item tracker reporting the
-//    product price as "value". Which action means revenue and which means profit
-//    is a DISPLAY decision (migration 033), so the sync stays neutral and the
-//    user can change their mind without re-syncing.
-//
-// 3. ITEM IDS ARE VARIANT-LEVEL. Google reports per Merchant Center offer. The
-//    raw id is stored as the key, with product/variant refs resolved beside it,
-//    so product-level roll-up and variant-level detail both read one table.
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 import {
@@ -44,6 +20,8 @@ export type SyncResult = {
   actions: string[]
   itemIds: number
   products: number
+  campaigns: number
+  campaignDays: number
   unmatched: number
   pattern: IdPattern | null
   patternConfidence: number
@@ -67,10 +45,12 @@ const emptyBucket = (): Bucket => ({
   conversions_value: 0,
 })
 
+const UNKNOWN_CAMPAIGN = 'unknown'
+
+const SEP = '\u0000'
+
 // ── Window ───────────────────────────────────────────────────────────────────
 
-// Ends YESTERDAY: today is a partial day in the account's timezone and would
-// make every "last N days" comparison wobble depending on the hour it ran.
 export function syncWindow(days: number, now = new Date()): { from: string; to: string } {
   const DAY = 86_400_000
   const to = new Date(now.getTime() - DAY)
@@ -80,17 +60,8 @@ export function syncWindow(days: number, now = new Date()): { from: string; to: 
 
 // ── Queries ──────────────────────────────────────────────────────────────────
 
-// One Ads account can serve several markets; the feed label isolates the one
-// this feed represents.
-//
-// GAQL requires any segment used in WHERE to ALSO appear in SELECT
-// (EXPECTED_REFERENCED_FIELD_IN_SELECT_CLAUSE), so the filter and the projection
-// have to be added together — which is why this returns both halves rather than
-// just a WHERE fragment.
 function feedLabelParts(feedLabel: string | null): { select: string; where: string } {
   if (!feedLabel) return { select: '', where: '' }
-  // Escaped defensively even though it comes from our own settings — GAQL
-  // string literals are single-quoted.
   const escaped = feedLabel.replace(/'/g, "\\'")
   return {
     select: ', segments.product_feed_label',
@@ -98,9 +69,6 @@ function feedLabelParts(feedLabel: string | null): { select: string; where: stri
   }
 }
 
-// Base metrics. metrics.conversions here is the ACCOUNT DEFAULT (primary goals
-// only) — stored for reconciling against the Google Ads UI, never used for
-// ROAS/POAS, which come from a named action instead.
 async function fetchBaseMetrics(
   client: GoogleAdsClient,
   from: string,
@@ -110,6 +78,7 @@ async function fetchBaseMetrics(
   const label = feedLabelParts(feedLabel)
   return client.query(
     `SELECT segments.date, segments.product_item_id,
+            campaign.id, campaign.name, campaign.advertising_channel_type, campaign.status,
             metrics.impressions, metrics.clicks, metrics.cost_micros,
             metrics.conversions, metrics.conversions_value${label.select}
      FROM shopping_performance_view
@@ -117,12 +86,22 @@ async function fetchBaseMetrics(
   )
 }
 
-// EVERY conversion action, unfiltered. segments.conversion_action_name is only
-// valid alongside all_conversions metrics — metrics.conversions cannot be
-// segmented this way.
-//
-// The result is sparse: Google returns only action/item/day combinations that
-// actually converted, which on a real catalogue is a small minority of rows.
+
+async function fetchCampaignTotals(
+  client: GoogleAdsClient,
+  from: string,
+  to: string
+): Promise<GoogleAdsRow[]> {
+  return client.query(
+    `SELECT campaign.id, campaign.name, campaign.advertising_channel_type, campaign.status,
+            segments.date,
+            metrics.impressions, metrics.clicks, metrics.cost_micros,
+            metrics.conversions, metrics.conversions_value
+     FROM campaign
+     WHERE segments.date BETWEEN '${from}' AND '${to}'`
+  )
+}
+
 async function fetchAllActionMetrics(
   client: GoogleAdsClient,
   from: string,
@@ -132,6 +111,7 @@ async function fetchAllActionMetrics(
   const label = feedLabelParts(feedLabel)
   return client.query(
     `SELECT segments.date, segments.product_item_id, segments.conversion_action_name,
+            campaign.id,
             metrics.all_conversions, metrics.all_conversions_value${label.select}
      FROM shopping_performance_view
      WHERE segments.date BETWEEN '${from}' AND '${to}'${label.where}`
@@ -158,8 +138,6 @@ export async function syncGoogleAdsMetrics(
   try {
     base = await fetchBaseMetrics(client, from, to, settings.feed_label)
   } catch (err) {
-    // An auth failure is the connection's problem, not this feed's — record it
-    // once so every feed on that grant reports the same actionable state.
     if (err instanceof AppError && err.status === 401) {
       await markConnectionError(db, connectionId, err.message)
     }
@@ -167,19 +145,37 @@ export async function syncGoogleAdsMetrics(
     throw err
   }
 
-  // key = `${date} ${itemId}` — neither part can contain a space, so this is a
-  // safe composite that avoids allocating a nested map per day.
-  const rows = new Map<string, Bucket>()
-  const keyOf = (date: string, itemId: string) => `${date} ${itemId}`
+  const rows = new Map<string, Bucket & { date: string; itemId: string; campaignId: string }>()
+
+  const campaigns = new Map<
+    string,
+    { name: string | null; channelType: string | null; status: string | null }
+  >()
+
+  const noteCampaign = (r: GoogleAdsRow): string => {
+    const id = String(r.campaign?.id ?? '')
+    if (!id) return UNKNOWN_CAMPAIGN
+    if (!campaigns.has(id)) {
+      campaigns.set(id, {
+        name: r.campaign?.name != null ? String(r.campaign.name) : null,
+        channelType:
+          r.campaign?.advertisingChannelType != null
+            ? String(r.campaign.advertisingChannelType)
+            : null,
+        status: r.campaign?.status != null ? String(r.campaign.status) : null,
+      })
+    }
+    return id
+  }
 
   for (const r of base) {
     const date = String(r.segments?.date ?? '')
     const itemId = String(r.segments?.productItemId ?? '')
     if (!date || !itemId) continue
-    const k = keyOf(date, itemId)
+    const campaignId = noteCampaign(r)
+    const k = `${date}${SEP}${itemId}${SEP}${campaignId}`
     let b = rows.get(k)
-    if (!b) rows.set(k, (b = emptyBucket()))
-    // Several campaigns can serve the same item on the same day; sum them.
+    if (!b) rows.set(k, (b = { ...emptyBucket(), date, itemId, campaignId }))
     b.impressions += metricNumber(r.metrics?.impressions)
     b.clicks += metricNumber(r.metrics?.clicks)
     b.cost_micros += metricNumber(r.metrics?.costMicros)
@@ -188,7 +184,17 @@ export async function syncGoogleAdsMetrics(
   }
 
   // ── Conversions, per action ────────────────────────────────────────────────
-  const convByKey = new Map<string, { conversions: number; value: number }>()
+  const convByKey = new Map<
+    string,
+    {
+      date: string
+      itemId: string
+      campaignId: string
+      action: string
+      conversions: number
+      value: number
+    }
+  >()
   const actionNames = new Set<string>()
   try {
     for (const r of await fetchAllActionMetrics(client, from, to, settings.feed_label)) {
@@ -196,16 +202,17 @@ export async function syncGoogleAdsMetrics(
       const itemId = String(r.segments?.productItemId ?? '')
       const action = String(r.segments?.conversionActionName ?? '')
       if (!date || !itemId || !action) continue
+      const campaignId = noteCampaign(r)
       actionNames.add(action)
-      const k = `${date} ${itemId} ${action}`
-      const cur = convByKey.get(k) ?? { conversions: 0, value: 0 }
+      const k = `${date}${SEP}${itemId}${SEP}${campaignId}${SEP}${action}`
+      let cur = convByKey.get(k)
+      if (!cur) {
+        convByKey.set(k, (cur = { date, itemId, campaignId, action, conversions: 0, value: 0 }))
+      }
       cur.conversions += metricNumber(r.metrics?.allConversions)
       cur.value += metricNumber(r.metrics?.allConversionsValue)
-      convByKey.set(k, cur)
     }
   } catch (err) {
-    // Cost data is still worth storing without conversions — the page just shows
-    // spend with empty ROAS rather than nothing at all.
     warnings.push(
       `Could not fetch conversions per action: ${err instanceof Error ? err.message : 'unknown error'}`
     )
@@ -215,8 +222,7 @@ export async function syncGoogleAdsMetrics(
     warnings.push('No conversion data in this period — ROAS and POAS cannot be calculated.')
   }
 
-  // ── Resolve item ids → products ────────────────────────────────────────────
-  const itemIds = [...new Set([...rows.keys()].map((k) => k.split(' ')[1]))]
+  const itemIds = [...new Set([...rows.values()].map((b) => b.itemId))]
   const detection = detectIdPattern(itemIds)
   const pattern: IdPattern | null =
     settings.id_pattern && settings.id_pattern !== 'auto'
@@ -236,19 +242,18 @@ export async function syncGoogleAdsMetrics(
   const products = new Set<string>()
   const now = new Date().toISOString()
 
-  for (const [k, b] of rows) {
-    const [date, itemId] = k.split(' ')
-    const parsed = pattern ? parseItemId(itemId, pattern) : null
-    if (!parsed) unmatched++
+  const unmatchedItems = new Set<string>()
+
+  for (const b of rows.values()) {
+    const parsed = pattern ? parseItemId(b.itemId, pattern) : null
+    if (!parsed) unmatchedItems.add(b.itemId)
     else products.add(parsed.productRef)
 
     records.push({
       feed_id: feedId,
-      date,
-      item_id: itemId,
-      // Nullable on purpose: an unparseable id is still stored, so a pattern
-      // misconfiguration shows up as visible unmatched spend rather than as
-      // silently missing data.
+      date: b.date,
+      item_id: b.itemId,
+      campaign_id: b.campaignId,
       product_ref: parsed?.productRef ?? null,
       variant_ref: parsed?.variantRef ?? null,
       impressions: b.impressions,
@@ -259,37 +264,95 @@ export async function syncGoogleAdsMetrics(
       synced_at: now,
     })
   }
+  unmatched = unmatchedItems.size
 
   const convRecords: Record<string, unknown>[] = []
-  for (const [k, v] of convByKey) {
-    const [date, itemId, action] = k.split(' ')
+  for (const v of convByKey.values()) {
     convRecords.push({
       feed_id: feedId,
-      date,
-      item_id: itemId,
-      conversion_action: action,
+      date: v.date,
+      item_id: v.itemId,
+      campaign_id: v.campaignId,
+      conversion_action: v.action,
       conversions: v.conversions,
       conversions_value: v.value,
       synced_at: now,
     })
   }
 
-  // ── Persist ────────────────────────────────────────────────────────────────
-  await upsertChunked(db, 'google_ads_product_daily', records, 'feed_id,date,item_id', feedId)
+  // ── Campaign totals ────────────────────────────────────────────────────────
+  const campaignRecords: Record<string, unknown>[] = []
+  if (settings.feed_label) {
+    warnings.push(
+      `This feed is scoped to the «${settings.feed_label}» feed label, so campaign-level ` +
+        'totals cannot be attributed to it. Campaign figures show only the spend Google ' +
+        'attributed to products in this feed.'
+    )
+  } else {
+    try {
+      for (const r of await fetchCampaignTotals(client, from, to)) {
+        const date = String(r.segments?.date ?? '')
+        const campaignId = noteCampaign(r)
+        if (!date || campaignId === UNKNOWN_CAMPAIGN) continue
+        campaignRecords.push({
+          feed_id: feedId,
+          date,
+          campaign_id: campaignId,
+          impressions: metricNumber(r.metrics?.impressions),
+          clicks: metricNumber(r.metrics?.clicks),
+          cost_micros: metricNumber(r.metrics?.costMicros),
+          conversions: metricNumber(r.metrics?.conversions),
+          conversions_value: metricNumber(r.metrics?.conversionsValue),
+          synced_at: now,
+        })
+      }
+    } catch (err) {
+      warnings.push(
+        `Could not fetch campaign totals: ${err instanceof Error ? err.message : 'unknown error'}`
+      )
+    }
+  }
+
+  const campaignRows = [...campaigns].map(([campaignId, c]) => ({
+    feed_id: feedId,
+    campaign_id: campaignId,
+    name: c.name,
+    channel_type: c.channelType,
+    status: c.status,
+    synced_at: now,
+  }))
+
+  await upsertChunked(db, 'google_ads_campaigns', campaignRows, 'feed_id,campaign_id', feedId)
+
+  await upsertChunked(
+    db,
+    'google_ads_product_daily',
+    records,
+    'feed_id,date,item_id,campaign_id',
+    feedId
+  )
   await upsertChunked(
     db,
     'google_ads_product_conversions',
     convRecords,
-    'feed_id,date,item_id,conversion_action',
+    'feed_id,date,item_id,campaign_id,conversion_action',
     feedId
   )
+  await upsertChunked(
+    db,
+    'google_ads_campaign_daily',
+    campaignRecords,
+    'feed_id,date,campaign_id',
+    feedId
+  )
+
+  await clearSentinelRows(db, feedId, from, to)
 
   await db
     .from('google_ads_feed_settings')
     .update({
       last_synced_at: now,
       last_sync_error: null,
-      // Persist what was detected so the UI can show it and the user can override.
       ...(settings.id_pattern === 'auto' && pattern
         ? { id_pattern: pattern, id_pattern_country: detection.country }
         : {}),
@@ -306,6 +369,8 @@ export async function syncGoogleAdsMetrics(
     actions: [...actionNames].sort(),
     itemIds: itemIds.length,
     products: products.size,
+    campaigns: campaigns.size,
+    campaignDays: new Set(campaignRecords.map((r) => r.date as string)).size,
     unmatched,
     pattern,
     patternConfidence: detection.confidence,
@@ -332,6 +397,26 @@ async function upsertChunked(
   }
 }
 
+async function clearSentinelRows(
+  db: SupabaseClient,
+  feedId: string,
+  from: string,
+  to: string
+): Promise<void> {
+  for (const table of ['google_ads_product_daily', 'google_ads_product_conversions']) {
+    const { error } = await db
+      .from(table)
+      .delete()
+      .eq('feed_id', feedId)
+      .eq('campaign_id', '')
+      .gte('date', from)
+      .lte('date', to)
+    if (error) {
+      console.error(`[googleAdsSync] sentinel cleanup failed on ${table}:`, error.message)
+    }
+  }
+}
+
 async function noteSyncError(db: SupabaseClient, feedId: string, err: unknown): Promise<void> {
   const message = err instanceof Error ? err.message : String(err)
   await db
@@ -342,14 +427,6 @@ async function noteSyncError(db: SupabaseClient, feedId: string, err: unknown): 
 
 // ── Settings guard ───────────────────────────────────────────────────────────
 
-/**
- * What must be configured before a sync can run at all.
- *
- * The conversion actions are deliberately NOT listed: since migration 033 they
- * are a display preference, not a sync input. A feed with no action chosen still
- * syncs everything — the page just needs one picked before it can label a column
- * "ROAS".
- */
 export function missingSetup(s: GoogleAdsFeedSettings | null): string[] {
   if (!s) return ['Google Ads is not set up for this feed.']
   const missing: string[] = []

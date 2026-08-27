@@ -14,6 +14,8 @@ export type WasteRow = {
   cost: number
   poasValue: number
   profitAfterAdSpend: number | null
+  /** From the catalogue, so the unavailable table can say how much is gone. */
+  variantsTotal: number
 }
 
 const ROW_LIMIT = 200
@@ -26,6 +28,11 @@ type Props = {
   losing: WasteRow[]
   losingCost: number
   showLosing: boolean
+  /** Products with spend that cannot be bought RIGHT NOW — see the page. */
+  unavailable: WasteRow[]
+  unavailableCost: number
+  stockSyncedAt: string | null
+  stockAgeDays: number | null
   wastedEmpty: React.ReactNode
 }
 
@@ -37,6 +44,10 @@ export function WasteTables({
   losing,
   losingCost,
   showLosing,
+  unavailable,
+  unavailableCost,
+  stockSyncedAt,
+  stockAgeDays,
   wastedEmpty,
 }: Props) {
   const [query, setQuery] = useState('')
@@ -57,14 +68,54 @@ export function WasteTables({
 
   const wastedShown = filter(wasted)
   const losingShown = filter(losing)
+  const unavailableShown = filter(unavailable)
   const searching = query.trim().length > 0
 
   return (
     <>
-      {(wasted.length > 0 || losing.length > 0) && (
+      {(wasted.length > 0 || losing.length > 0 || unavailable.length > 0) && (
         <div className="flex justify-end">
           <SearchBox value={query} onChange={setQuery} />
         </div>
+      )}
+
+      {/* ── Spending on something nobody can buy ──────────────────── */}
+      {unavailable.length > 0 && (
+        <Table
+          title="Spend on unavailable stock"
+          note={`Out of stock now · ${formatMoney(unavailableCost, currency)} spent in the last ${days} days`}
+          head={['Product', 'Variants', 'Clicks', 'Cost']}
+          shown={Math.min(unavailableShown.length, ROW_LIMIT)}
+          total={unavailableShown.length}
+          filtered={searching}
+          emptyNote={
+            searching && unavailableShown.length === 0
+              ? `No product here matches «${query.trim()}». ${unavailable.length} are out of stock.`
+              : undefined
+          }
+          // The one caveat that decides whether this table can be acted on at
+          // all: it pairs a window of spend with stock as of one moment.
+          footnote={
+            stockSyncedAt
+              ? `Stock is as of ${new Date(stockSyncedAt).toLocaleString('da-DK')}` +
+                (stockAgeDays !== null && stockAgeDays > 0
+                  ? ` — ${stockAgeDays} day${stockAgeDays === 1 ? '' : 's'} ago`
+                  : '') +
+                `. The cost is the full ${days} days, so most of it was probably spent while the product was still in stock — this is a list of budget going somewhere unshippable today, not a list of money already lost.`
+              : undefined
+          }
+        >
+          {unavailableShown.slice(0, ROW_LIMIT).map((r) => (
+            <tr key={r.productRef} style={{ borderBottom: '0.5px solid var(--hairline)' }}>
+              <Td left>{r.title ?? r.productRef}</Td>
+              <Td muted>{r.variantsTotal > 0 ? `0 of ${r.variantsTotal}` : '—'}</Td>
+              <Td>{formatInt(r.clicks)}</Td>
+              <Td strong tone="bad">
+                {formatMoney(r.cost, currency)}
+              </Td>
+            </tr>
+          ))}
+        </Table>
       )}
 
       {/* ── Converting, and still underwater ──────────────────────── */}
@@ -181,6 +232,7 @@ function Table({
   total,
   filtered,
   emptyNote,
+  footnote,
   children,
 }: {
   title: string
@@ -190,6 +242,8 @@ function Table({
   total: number
   filtered?: boolean
   emptyNote?: string
+  /** A caveat that belongs to THIS table rather than to the page. */
+  footnote?: string
   children: React.ReactNode
 }) {
   return (
@@ -245,6 +299,19 @@ function Table({
         <p style={{ fontSize: '11px', color: 'var(--ink-muted)', padding: '10px 18px' }}>
           Showing the {shown} largest of {total}
           {filtered ? ' matching' : ''}. The totals above cover every product, searched or not.
+        </p>
+      )}
+      {footnote && (
+        <p
+          style={{
+            fontSize: '11px',
+            color: 'var(--ink-muted)',
+            padding: '10px 18px',
+            lineHeight: 1.5,
+            borderTop: '1px solid var(--hairline)',
+          }}
+        >
+          {footnote}
         </p>
       )}
     </section>
